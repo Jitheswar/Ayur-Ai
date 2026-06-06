@@ -135,6 +135,7 @@ def _components_by_class(samples, threshold=8):
     dedup split and the CV splitter so both see identical component structure.
     """
     import collections
+    import hashlib
     import json
 
     try:
@@ -160,7 +161,12 @@ def _components_by_class(samples, threshold=8):
         try:
             h = imagehash.phash(PILImage.open(path).convert("RGB"), hash_size=8)
         except Exception:
-            h = imagehash.phash(PILImage.new("RGB", (8, 8)), hash_size=8)
+            # Unreadable image: derive a deterministic, per-path pseudo-hash so
+            # each failure stays its own singleton component. A constant hash
+            # (e.g. of a blank image) would instead collide all corrupt images
+            # into one bogus near-duplicate group, distorting the leak-free split.
+            digest = hashlib.sha1(str(path).encode()).hexdigest()[:16]
+            h = imagehash.hex_to_hash(digest)
         hashes[i] = h
         cache[key] = str(h)
         dirty = True
@@ -263,6 +269,10 @@ def _component_stratified_split(samples, val_split, test_split, seed, threshold=
         n = len(comp_list)
         n_test = max(1, int(round(n * test_split)))
         n_val  = max(1, int(round(n * val_split)))
+        # Guarantee ≥1 train component (mirrors _stratified_split): never let
+        # test+val consume the whole class. For n=1 the lone component falls
+        # through to train, so every class stays learnable.
+        n_test = min(n_test, n - 1)
         n_val  = min(n_val, max(0, n - n_test - 1))
         for members in comp_list[:n_test]:
             test_idx.extend(members)

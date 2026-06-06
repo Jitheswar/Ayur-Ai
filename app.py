@@ -41,7 +41,7 @@ def get_retriever() -> PlantRetriever:
 
 
 @st.cache_resource(show_spinner=True)
-def get_predictor(_ckpt_mtime: float):
+def get_predictor(ckpt_mtime: float):
     """Load the CNN predictor.
 
     The checkpoint's mtime is part of the cache key, so retraining the model

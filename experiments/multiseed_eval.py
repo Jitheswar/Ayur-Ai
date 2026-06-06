@@ -61,10 +61,15 @@ def main() -> None:
     for seed in seeds:
         cfg = Config.load()
         cfg.data.seed = seed
+        # Train to a per-seed scratch checkpoint so we never overwrite the
+        # production model at models/best_model.pt (served by the app / predict
+        # / evaluate). _eval_test reads it back via cfg.checkpoint_path.
+        cfg.train.checkpoint_path = f"models/_mseed_{seed}.pt"
         T.set_seed(seed)
         t0 = time.time()
         res = T.train_model(cfg, device, verbose=False)
         acc, f1, n = _eval_test(cfg, device)
+        cfg.checkpoint_path.unlink(missing_ok=True)
         dt = time.time() - t0
         rows.append({
             "seed": seed, "test_acc": round(acc, 4), "test_macro_f1": round(f1, 4),

@@ -1,0 +1,34 @@
+# ===========================================================================
+# Configuration for the Ayurvedic Leaf Detection project.
+# Every field can be overridden on the command line, e.g.:
+#     python -m src.train --backbone efficientnet_b0 --epochs 30
+# ===========================================================================
+
+data:
+  # Folder containing one sub-folder per plant class, each holding its images:
+  #   data/raw/Ocimum Tenuiflorum (Tulsi)/img001.jpg ...
+  raw_dir: data/raw
+  image_size: 224            # input size fed to the CNN
+  val_split: 0.15            # fraction of data held out for validation
+  test_split: 0.15           # fraction of data held out for the final test
+  batch_size: 32
+  num_workers: 4
+  seed: 42
+
+model:
+  # One of: resnet18, resnet50, mobilenet_v2, efficientnet_b0
+  backbone: resnet18
+  pretrained: true           # use ImageNet weights (transfer learning)
+  freeze_backbone: false     # if true, only the new classifier head is trained
+  dropout: 0.2
+
+train:
+  epochs: 20
+  lr: 0.0003
+  weight_decay: 0.0001
+  label_smoothing: 0.1
+  early_stopping_patience: 5 # stop if val accuracy does not improve for N epochs
+  checkpoint_path: models/best_model.pt
+
+nlp:
+  knowledge_base: data/knowledge_base/plants.json

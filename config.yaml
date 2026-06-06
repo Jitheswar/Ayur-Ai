@@ -19,7 +19,7 @@ data:
 
 model:
   # One of: resnet18, resnet50, mobilenet_v2, efficientnet_b0
-  backbone: resnet18
+  backbone: resnet18          # iter7: efficientnet_b0 throttles this laptop GPU (33% clock, fold>10min) — impractical; reverted
   pretrained: true           # use ImageNet weights (transfer learning)
   freeze_backbone: false     # if true, only the new classifier head is trained
   dropout: 0.2

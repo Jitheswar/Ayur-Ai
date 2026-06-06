@@ -38,10 +38,10 @@ running **fully on-device** (local only) with **zero stability issues**
 0. **Evaluation rigor** — ✅ DONE. determinism (iter 4), multi-seed band (iter 4), **component 5-fold CV canonical metric** (iter 5, pooled 0.9864±0.009), selection fixed → `val_acc_loss` (iter 5). All future levers judged on CV.
 1. **Data** (leakage/dedup ✅) — aug ✗ (iter 6: TrivialAugmentWide HURT 0.9864→0.9657, reverted; the hand-tuned standard aug is already well-fitted). class balancing untried (low EV — macro_f1 already 0.985). dedup *threshold* = eval-definition knob, hold at 8.
 2. **Training** — EMA ✗ (iter 3, reverted); `select_on=val_acc_loss` ✅ (iter 5). LR sched/warmup, optimizer, wd, grad clip, longer — untried
-3. Regularization (dropout, label smoothing already active; mixup, TTA) — untried
-4. Capacity (bigger backbone if it fits 6 GB) — **← NEXT (iter 7): efficientnet_b0** (higher ImageNet acc, fewer params than resnet18 → good for small-data transfer; fits budget easily)
-5. On-device efficiency (AMP, batch size, grad accum) — untried
-6. Compression LAST (PTQ → QAT) — untried
+3. Regularization (dropout, label smoothing already active; mixup, TTA) — **TTA ← NEXT (iter 8)** (cheap, no retrain, on-device-friendly); mixup low-EV (strong aug already hurt)
+4. Capacity — ✗ CLOSED on this hardware (iter 7: efficientnet_b0 throttles laptop GPU to 33% clock, fold-0 >10 min, full CV = hours → impractical; resnet50 would be worse; depthwise nets (effnet/mobilenet) trigger the power/thermal cap). resnet18 is the practical ceiling.
+5. On-device efficiency (AMP, batch size, grad accum) — untried (AMP may cut memory/throttle, but not a quality lever)
+6. Compression LAST (PTQ → QAT) — untried (relevant once quality ceiling confirmed)
 
 ---
 
@@ -145,4 +145,12 @@ running **fully on-device** (local only) with **zero stability issues**
 - **DECISION: REVERT** (`augment: standard`, restored byte-for-byte; TA code kept as opt-in). Canonical metric unchanged at **0.9864**. Served checkpoint untouched (cv_eval never writes one) and still serves ✅.
 - **Reason / next → iter 7 (lever 4, Capacity):** augmentation lever shows the existing aug is already well-tuned; stronger hurts. Next, try **efficientnet_b0** — higher ImageNet accuracy and *fewer* params than resnet18 (better small-data transfer), fits the 6 GB budget with huge headroom — CV-evaluated against 0.9864.
 
-<!-- next-iteration: 7 -->
+### Iteration 7 — Capacity: efficientnet_b0 → REJECTED (impractical on-device)
+- **Hypothesis:** efficientnet_b0 (higher ImageNet acc, only 4.0M params vs resnet18's 11.2M) would transfer better on this small dataset and beat CV 0.9864.
+- **Pre-flight:** builds + trains; peak GPU 2.94/3.36 GB ≤ 6 ✅ (no OOM).
+- **What happened:** the 5-fold CV ran **51 min on fold 0 alone** (resnet18 does all 5 folds in 12 min). Diagnosed: **laptop RTX 3050 power/thermal throttling** under sustained heavier compute — SM clock dropped to **697/2100 MHz (33%)**, throttle reason `0x24` (SW thermal + SW power cap). Confirmed *not* a determinism artifact (determinism overhead measured ≈1.0–1.1× for resnet18; the throttle hit resnet18 equally during contention). Re-ran from a cool 44 °C start with a 10-min fold-0 deadline + auto-kill monitor → **fold 0 still unfinished at 631 s**, clock still 697 MHz. Full CV would take hours.
+- **DECISION: REVERT to resnet18** (per "couldn't run it → log + revert"). efficientnet_b0 violates the on-device practicality guardrail on this hardware. No checkpoint was overwritten (cv_eval doesn't save; runs were killed pre-completion); served resnet18 model intact ✅. Canonical metric unchanged **0.9864**.
+- **Findings worth keeping:** (1) **determinism is ~free** (≈1.0–1.1× on resnet18) — the iter-4 reproducibility guardrail costs almost nothing. (2) **The capacity lever is closed on this device** — depthwise-conv nets (efficientnet/mobilenet) trip the power/thermal cap; resnet50 would be heavier still. resnet18 is the practical backbone here.
+- **Reason / next → iter 8 (lever 3, TTA):** capacity is out; data is the real limit (few distinct examples/class). Test-time augmentation is the cheapest remaining quality lever — no retraining, light inference cost on resnet18, may help the hard near-dup fold. Evaluate via CV (add hflip-averaged TTA to the test pass) against 0.9864.
+
+<!-- next-iteration: 8 -->

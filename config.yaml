@@ -30,6 +30,8 @@ train:
   label_smoothing: 0.1
   early_stopping_patience: 5 # stop if val accuracy does not improve for N epochs
   checkpoint_path: models/best_model.pt
+  ema: false                 # EMA tried in iter3 — it HURT (test_acc 0.9964→0.9892); left off. Code kept as opt-in.
+  ema_decay: 0.995           # (only used when ema: true)
 
 nlp:
   knowledge_base: data/knowledge_base/plants.json

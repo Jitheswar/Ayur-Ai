@@ -65,7 +65,7 @@ def set_seed(seed: int) -> None:
     torch.cuda.manual_seed_all(seed)
 
 
-def run_epoch(model, loader, criterion, optimizer, device, train: bool):
+def run_epoch(model, loader, criterion, optimizer, device, train: bool, ema_model=None):
     model.train(train)
     total, correct, loss_sum = 0, 0, 0.0
     desc = "train" if train else "val  "
@@ -79,6 +79,8 @@ def run_epoch(model, loader, criterion, optimizer, device, train: bool):
         if train:
             loss.backward()
             optimizer.step()
+            if ema_model is not None:
+                ema_model.update_parameters(model)
         loss_sum += loss.item() * images.size(0)
         correct += (outputs.argmax(1) == labels).sum().item()
         total += images.size(0)
@@ -117,6 +119,22 @@ def main() -> None:
     )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cfg.train.epochs)
 
+    # Optional EMA of weights: a separate averaged copy of the model that often
+    # generalises / calibrates better than the raw SGD iterate. When enabled we
+    # select on and serve the EMA weights. use_buffers=True also averages the
+    # BatchNorm running stats so the served model is self-consistent.
+    ema_model = None
+    if getattr(cfg.train, "ema", False):
+        from torch.optim.swa_utils import AveragedModel
+
+        decay = cfg.train.ema_decay
+
+        def _ema_avg(avg_p, cur_p, _num):
+            return decay * avg_p + (1.0 - decay) * cur_p
+
+        ema_model = AveragedModel(model, avg_fn=_ema_avg, use_buffers=True)
+        print(f"EMA enabled (decay={decay}); selecting + serving the EMA weights.")
+
     history = []
     # Start below any real accuracy so the first epoch always checkpoints --
     # this also guarantees a model is saved even when there is no val split.
@@ -124,8 +142,12 @@ def main() -> None:
     start = time.time()
 
     for epoch in range(1, cfg.train.epochs + 1):
-        tr_loss, tr_acc = run_epoch(model, loaders["train"], criterion, optimizer, device, True)
-        va_loss, va_acc = run_epoch(model, loaders["val"], criterion, optimizer, device, False)
+        tr_loss, tr_acc = run_epoch(
+            model, loaders["train"], criterion, optimizer, device, True, ema_model=ema_model
+        )
+        # Validate (and later serve) the EMA weights when EMA is enabled.
+        eval_model = ema_model.module if ema_model is not None else model
+        va_loss, va_acc = run_epoch(eval_model, loaders["val"], criterion, optimizer, device, False)
         scheduler.step()
         history.append(
             {"epoch": epoch, "train_loss": tr_loss, "train_acc": tr_acc,
@@ -143,7 +165,7 @@ def main() -> None:
             best_metric = metric
             epochs_no_improve = 0
             save_checkpoint(
-                cfg.checkpoint_path, model, class_names, cfg,
+                cfg.checkpoint_path, eval_model, class_names, cfg,
                 extra={"val_acc": va_acc, "train_acc": tr_acc, "epoch": epoch},
             )
             label = "val" if has_val else "train"

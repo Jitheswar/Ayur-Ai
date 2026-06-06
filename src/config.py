@@ -50,6 +50,8 @@ class TrainCfg:
     label_smoothing: float = 0.1
     early_stopping_patience: int = 5
     checkpoint_path: str = "models/best_model.pt"
+    ema: bool = False          # if True, keep an EMA of weights and select/serve the EMA model
+    ema_decay: float = 0.999   # EMA decay; effective averaging window ~ 1/(1-decay) steps
 
 
 @dataclass

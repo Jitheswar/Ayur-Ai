@@ -8,6 +8,8 @@ outputs/*
 
 # Experiment artifacts (keep journal.md, profile_run.py, runs.jsonl)
 experiments/*.log
+experiments/error_analysis.json   # regenerated per-checkpoint diagnostic; findings go in journal.md
+experiments/.phash_cache.json     # cached perceptual hashes (speeds repeated dedup splits)
 
 # Python
 __pycache__/

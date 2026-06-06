@@ -38,10 +38,16 @@ running **fully on-device** (local only) with **zero stability issues**
 0. **Evaluation rigor** — ✅ DONE. determinism (iter 4), multi-seed band (iter 4), **component 5-fold CV canonical metric** (iter 5, pooled 0.9864±0.009), selection fixed → `val_acc_loss` (iter 5). All future levers judged on CV.
 1. **Data** (leakage/dedup ✅) — aug ✗ (iter 6: TrivialAugmentWide HURT 0.9864→0.9657, reverted; the hand-tuned standard aug is already well-fitted). class balancing untried (low EV — macro_f1 already 0.985). dedup *threshold* = eval-definition knob, hold at 8.
 2. **Training** — EMA ✗ (iter 3, reverted); `select_on=val_acc_loss` ✅ (iter 5). LR sched/warmup, optimizer, wd, grad clip, longer — untried
-3. Regularization (dropout, label smoothing already active; mixup, TTA) — **TTA ← NEXT (iter 8)** (cheap, no retrain, on-device-friendly); mixup low-EV (strong aug already hurt)
-4. Capacity — ✗ CLOSED on this hardware (iter 7: efficientnet_b0 throttles laptop GPU to 33% clock, fold-0 >10 min, full CV = hours → impractical; resnet50 would be worse; depthwise nets (effnet/mobilenet) trigger the power/thermal cap). resnet18 is the practical ceiling.
+3. Regularization — TTA ✗ (iter 8: hflip-TTA HURT 0.9864→0.9831, reverted; leaves have orientation-dependent features + model already flip-trained). dropout/label-smoothing active; mixup low-EV (strong aug already hurt).
+4. Capacity — ✗ CLOSED on this hardware (iter 7: efficientnet_b0 throttles laptop GPU to 33% clock, fold-0 >10 min, full CV = hours → impractical; resnet50 worse; depthwise nets trip the power/thermal cap). resnet18 is the practical ceiling.
 5. On-device efficiency (AMP, batch size, grad accum) — untried (AMP may cut memory/throttle, but not a quality lever)
-6. Compression LAST (PTQ → QAT) — untried (relevant once quality ceiling confirmed)
+6. Compression LAST (PTQ → QAT) — untried (eval-only, throttle-immune; the designated closing lever now the quality ceiling is reached)
+
+## ⚠ Stopping-condition status (checked iter 8)
+- **Quality ceiling reached at CV 0.9864.** Diverse levers ALL failed to beat it: EMA (iter 3 ✗), strong aug/TrivialAugmentWide (iter 6 ✗), capacity/efficientnet (iter 7 ✗ impractical), TTA-ensembling (iter 8 ✗). Only ever gain: selection val_acc_loss (iter 5, +0.0006).
+- **3 consecutive no-improvement iterations** (6,7,8). Residual error is largely **irreducible**: genuine visual confusions (Mango↔Oleander) + data-limited giant near-dup components (few distinct examples/class).
+- **Remaining levers are low-EV** (training-schedule fine-tuning, class balancing — macro_f1 already 0.985) **or non-quality** (efficiency, compression).
+- **Plan:** iter 9 = compression (INT8 PTQ, eval-only → throttle-immune) to document the on-device quality/size/latency tradeoff (the prescribed last lever). If it confirms no quality headroom, **declare LOOP COMPLETE** (lever list exhausted across categories 1–6).
 
 ---
 
@@ -153,4 +159,19 @@ running **fully on-device** (local only) with **zero stability issues**
 - **Findings worth keeping:** (1) **determinism is ~free** (≈1.0–1.1× on resnet18) — the iter-4 reproducibility guardrail costs almost nothing. (2) **The capacity lever is closed on this device** — depthwise-conv nets (efficientnet/mobilenet) trip the power/thermal cap; resnet50 would be heavier still. resnet18 is the practical backbone here.
 - **Reason / next → iter 8 (lever 3, TTA):** capacity is out; data is the real limit (few distinct examples/class). Test-time augmentation is the cheapest remaining quality lever — no retraining, light inference cost on resnet18, may help the hard near-dup fold. Evaluate via CV (add hflip-averaged TTA to the test pass) against 0.9864.
 
-<!-- next-iteration: 8 -->
+### Iteration 8 — Regularization: test-time augmentation (hflip-TTA) → REJECTED
+- **Hypothesis:** averaging predictions over the image + its horizontal flip (cheap, no retraining) would improve the metric, especially on the hard near-dup fold.
+- **Method:** recorded BOTH plain and TTA test predictions in one deterministic CV run (TTA = argmax of softmax(x)+softmax(hflip(x)); selection on val is TTA-independent, so both share selected epochs). Single run → plain doubles as a determinism sanity check.
+- **Result — CV k=5, seed 42:**
+  | metric | plain | +hflip-TTA | Δ |
+  |---|---|---|---|
+  | pooled acc (val_acc_loss) | **0.9864** | 0.9831 | **−0.0033** |
+  | pooled macro_f1 | 0.9849 | 0.9815 | −0.0034 |
+  | pooled acc (val_acc) | 0.9858 | 0.9826 | −0.0032 |
+  - **Sanity ✅:** plain pooled_acc reproduced iter 5 *exactly* (0.9858 / 0.9864) — deterministic run, undisturbed by the TTA code.
+  - TTA consistently **hurts ~0.3%** (≈6 extra errors/1835). Leaves carry orientation-dependent discriminative features, and the model is already trained with RandomHorizontalFlip, so the flipped view adds noise rather than signal.
+- **DECISION: REJECT.** Reverted the TTA additions to `cv_eval.py` (kept lean; finding recorded). Not added to serving. Canonical metric unchanged **0.9864**.
+- **Note:** run took 4708 s (vs ~736 s) — the laptop GPU is now persistently throttled (~47% clock) from sustained back-to-back loads; correctness unaffected (deterministic), but further training-based CV is expensive. Favors eval-only experiments next.
+- **Reason / next → iter 9 (lever 6, Compression):** quality ceiling reached (see stopping-condition note). Do INT8 PTQ — **eval-only, throttle-immune** — to document the on-device quality/size/latency tradeoff, then assess LOOP COMPLETE.
+
+<!-- next-iteration: 9 -->

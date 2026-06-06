@@ -22,15 +22,17 @@ running **fully on-device** (local only) with **zero stability issues**
 
 ---
 
-## Current best — CANONICAL METRIC = component 5-fold CV (iter 5)
+## Current best — CANONICAL METRIC = component 5-fold CV (iter 5; unbeaten through iter 9)
 | metric | value | from |
 |---|---|---|
 | **CV pooled test_acc** | **0.9864** (per-fold std 0.0093) | iter 5 CV, select_on=val_acc_loss |
 | **CV pooled macro_f1** | **0.9849** | iter 5 CV |
 | served checkpoint (single dedup split, seed 42) | test_acc 0.9928 / macro_f1 0.9912 (one draw) | iter 5 |
 | recipe | resnet18 @224, dedup (pHash≤8) split, **val_acc_loss** selection, deterministic | — |
+| served model footprint | fp32 44.85 MB · 2 ms GPU / 12.6 ms CPU per image | iter 1/5/9 |
+| compression option (not shipped) | INT8 PTQ: 11.3 MB (−75%), 8.7 ms CPU (1.44×), **0.0000 quality cost** | iter 9 |
 | how to reproduce the metric | `.venv/bin/python -m experiments.cv_eval --k 5 --seed 42` | — |
-| ⚠ noise context | single-split test_acc is noise-limited (multi-seed 0.968±0.054, range 0.872–1.0). **Judge all future levers on the CV pooled number, not a single split.** | — |
+| ⚠ noise context | single-split test_acc is noise-limited (multi-seed 0.968±0.054, range 0.872–1.0). **Judge levers on the CV pooled number, not a single split.** | — |
 
 ---
 
@@ -41,13 +43,13 @@ running **fully on-device** (local only) with **zero stability issues**
 3. Regularization — TTA ✗ (iter 8: hflip-TTA HURT 0.9864→0.9831, reverted; leaves have orientation-dependent features + model already flip-trained). dropout/label-smoothing active; mixup low-EV (strong aug already hurt).
 4. Capacity — ✗ CLOSED on this hardware (iter 7: efficientnet_b0 throttles laptop GPU to 33% clock, fold-0 >10 min, full CV = hours → impractical; resnet50 worse; depthwise nets trip the power/thermal cap). resnet18 is the practical ceiling.
 5. On-device efficiency (AMP, batch size, grad accum) — untried (AMP may cut memory/throttle, but not a quality lever)
-6. Compression LAST (PTQ → QAT) — untried (eval-only, throttle-immune; the designated closing lever now the quality ceiling is reached)
+6. Compression LAST (PTQ → QAT) — ✅ DONE (iter 9: INT8 static PTQ = **zero quality cost**, 4× smaller, 1.44× faster CPU; documented as opt-in, fp32 stays served since it's faster on GPU). QAT unnecessary (PTQ already lossless).
 
-## ⚠ Stopping-condition status (checked iter 8)
-- **Quality ceiling reached at CV 0.9864.** Diverse levers ALL failed to beat it: EMA (iter 3 ✗), strong aug/TrivialAugmentWide (iter 6 ✗), capacity/efficientnet (iter 7 ✗ impractical), TTA-ensembling (iter 8 ✗). Only ever gain: selection val_acc_loss (iter 5, +0.0006).
-- **3 consecutive no-improvement iterations** (6,7,8). Residual error is largely **irreducible**: genuine visual confusions (Mango↔Oleander) + data-limited giant near-dup components (few distinct examples/class).
-- **Remaining levers are low-EV** (training-schedule fine-tuning, class balancing — macro_f1 already 0.985) **or non-quality** (efficiency, compression).
-- **Plan:** iter 9 = compression (INT8 PTQ, eval-only → throttle-immune) to document the on-device quality/size/latency tradeoff (the prescribed last lever). If it confirms no quality headroom, **declare LOOP COMPLETE** (lever list exhausted across categories 1–6).
+## ✅ STOPPING CONDITION MET (iter 9) → LOOP COMPLETE
+- **Quality ceiling reached at CV 0.9864 / macro_f1 0.9849.** Diverse quality levers ALL failed to beat it: EMA (iter 3 ✗), strong aug/TrivialAugmentWide (iter 6 ✗), capacity/efficientnet (iter 7 ✗ impractical), TTA-ensembling (iter 8 ✗). Only ever gain: selection val_acc_loss (iter 5, +0.0006). Compression (iter 9) preserves quality exactly.
+- **4 consecutive iterations with no metric improvement** (6,7,8,9). Residual error is **irreducible** on this data: genuine visual confusions (Mango↔Oleander, both lance-shaped) + data-limited giant near-dup components (some classes have ~5 truly distinct examples).
+- **Remaining untried levers are all low-EV or likely-negative:** class balancing (macro_f1 already 0.985; errors aren't in minority classes), LR/wd/schedule tuning (model already converges to perfect train fit), mixup (strong regularisation already hurt — see iter 6), AMP (efficiency, not quality). None plausibly beats the ceiling; each would cost ~77 min of throttled CV for ~0 expected gain.
+- **All six lever categories addressed (1 Data, 2 Training, 3 Regularisation, 4 Capacity, 5 Efficiency-n/a, 6 Compression).** Goal achieved on every axis: max metric (at ceiling), on-device (resnet18 fits 6 GB w/ headroom, 2 ms GPU), stable (no OOM/crash), reproducible (deterministic, byte-identical checkpoints).
 
 ---
 
@@ -174,4 +176,25 @@ running **fully on-device** (local only) with **zero stability issues**
 - **Note:** run took 4708 s (vs ~736 s) — the laptop GPU is now persistently throttled (~47% clock) from sustained back-to-back loads; correctness unaffected (deterministic), but further training-based CV is expensive. Favors eval-only experiments next.
 - **Reason / next → iter 9 (lever 6, Compression):** quality ceiling reached (see stopping-condition note). Do INT8 PTQ — **eval-only, throttle-immune** — to document the on-device quality/size/latency tradeoff, then assess LOOP COMPLETE.
 
-<!-- next-iteration: 9 -->
+### Iteration 9 — Compression: INT8 post-training quantization (the last lever)
+- **Hypothesis / purpose:** with the quality ceiling reached, characterise the on-device compression tradeoff (the loop's prescribed final step). Eval-only on CPU → immune to the GPU throttling that slowed iters 7–8.
+- **Method:** FX graph-mode **static** INT8 PTQ (x86 backend) on the served resnet18 checkpoint — quantizes conv+linear (vs dynamic, which only touches Linear); calibrated on 256 training images. New `experiments/ptq_eval.py`.
+- **Result (production test split, n=277):**
+  | model | test_acc | macro_f1 | size | CPU latency |
+  |---|---|---|---|---|
+  | fp32 (served) | 0.9928 | 0.9912 | 44.85 MB | 12.55 ms |
+  | INT8 PTQ | 0.9928 | 0.9912 | **11.32 MB** | **8.69 ms** |
+  - **Quality cost = 0.0000** (identical predictions), **size −75 % (4×)**, **CPU latency 1.44× faster**. QAT not needed (PTQ already lossless).
+- **DECISION: KEEP fp32 as the served model; document INT8 as an opt-in.** Rationale: the goal is max metric (int8 only preserves it); quantized inference is CPU-only and fp32-on-GPU (2 ms) beats int8-on-CPU (8.7 ms); the model already deploys comfortably. INT8 is the right pick *only* for a CPU-/size-constrained target — now characterised at zero cost.
+- **Guardrails:** eval-only, no training; serving path (fp32) unchanged ✅; reproducible ✅.
+
+---
+
+## FINAL SUMMARY (9 iterations)
+- **Headline:** the real deliverable was *measurement honesty*. The starting "0.9964" was one lucky draw from a noisy single split; the true, reproducible quality is **CV pooled acc 0.9864 / macro_f1 0.9849** (resnet18, dedup split, val_acc_loss selection, deterministic).
+- **What moved the needle:** dedup component split (removed 374 train↔test leak pairs) and a reproducible, low-variance CV metric — these made every later decision trustworthy. val_acc_loss selection added a marginal +0.0006.
+- **What didn't (and why it's informative):** EMA, TrivialAugmentWide, and hflip-TTA all *hurt* (model is near-saturated; extra regularisation/ensembling adds noise). efficientnet_b0 was impractical (laptop-GPU thermal/power throttling). INT8 PTQ is lossless but unneeded for GPU serving.
+- **Why stopping:** the metric is at the dataset's practical ceiling — residual errors are genuinely ambiguous images + data scarcity (giant near-duplicate components), not fixable by modelling on this hardware.
+- **Repo state:** runnable, committed, served fp32 resnet18; reproduce the metric with `experiments/cv_eval.py`, the compression tradeoff with `experiments/ptq_eval.py`.
+
+LOOP COMPLETE

@@ -70,6 +70,9 @@ def set_seed(seed: int) -> None:
     import numpy as np
 
     os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+    # PYTHONHASHSEED only takes effect at interpreter startup, so this fixes hash
+    # randomization for child processes spawned *after* here (e.g. spawn-mode
+    # DataLoader workers), not this process — which the explicit seeds below cover.
     os.environ.setdefault("PYTHONHASHSEED", str(seed))
     random.seed(seed)
     np.random.seed(seed)

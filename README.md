@@ -18,24 +18,34 @@ image** and then **retrieves its medicinal properties** — all offline, with
 ## Results (this build)
 
 Trained on the **Mendeley Medicinal Leaf Dataset** — 30 species, 1,835 images
-(segmented), split 70 / 15 / 15 (train / val / test).
+(segmented). To avoid leakage from near-identical photos of the same physical
+leaf, the splitter groups near-duplicate images (pHash Hamming ≤ 8) into
+components and assigns each whole component to a single split
+(`val_split = test_split = 0.15` of components).
+
+The headline number is **5-fold cross-validation over those components** — every
+image is predicted once, by a model that never saw its component — which is far
+less noisy than a single random split (a single split swings ~0.87–1.00 across
+seeds; see `experiments/multiseed.jsonl`).
 
 | Setting | Value |
 |---------|-------|
 | Backbone | ResNet18 (ImageNet transfer learning) |
 | Hardware | NVIDIA RTX 3050 6 GB (CUDA) |
-| Training time | ~1.2 min (early-stopped at epoch 13) |
-| Best validation accuracy | **99.64 %** (epoch 8) |
-| **Test accuracy** | **100 %** (274 / 274) |
-| Macro F1 (test) | **1.00** |
+| Checkpoint selection | `val_acc_loss` (loss tie-break on the saturated val plateau) |
+| **Canonical 5-fold CV** (over near-dup components) | **pooled acc 0.9864**, macro F1 0.9849 (per-fold std 0.009) |
+| Served checkpoint (dedup split, seed 42) | test acc 0.9928 (275 / 277), macro F1 0.9912 |
+| Training time (one fit) | ~2 min |
 
 Runs are reproducible (Python/NumPy/torch seeded from `config.yaml`).
 
 Per-class report and confusion matrix are written to `outputs/`. Example
-end-to-end prediction on a Tulsi leaf → `Ocimum Tenuiflorum (Tulsi)` at 95.2 %
-confidence, with its medicinal properties retrieved from the knowledge base.
+end-to-end prediction on a Tulsi leaf → `Ocimum Tenuiflorum (Tulsi)`, with its
+medicinal properties retrieved from the knowledge base.
 
-> Reproduce: `python -m src.train` then `python -m src.evaluate`.
+> Reproduce: `python -m src.train` then `python -m src.evaluate` for the served
+> checkpoint, or `python -m experiments.cv_eval --k 5 --seed 42` for the
+> canonical CV number.
 
 ---
 

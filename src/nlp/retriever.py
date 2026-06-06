@@ -58,7 +58,7 @@ class PlantRetriever:
         for idx in ranked[:top_k]:
             score = float(sims[idx])
             if score <= min_score:
-                continue
+                break  # ranked is descending, so everything after is also below
             hits.append(RetrievalHit(plant=self.plants[idx], score=score))
         return hits
 

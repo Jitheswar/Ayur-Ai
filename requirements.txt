@@ -1,17 +1,23 @@
+# Upper bounds cap the next major (guards against breaking API changes);
+# lower bounds are the tested floor. Exact pinned versions live in .venv.
+
 # --- Deep Learning ---
-torch>=2.0
-torchvision>=0.15
+torch>=2.0,<3.0
+torchvision>=0.15,<1.0
 
 # --- NLP / retrieval (no LLM) ---
-scikit-learn>=1.3
+scikit-learn>=1.3,<2.0
 
 # --- Data & utils ---
-numpy>=1.24
+numpy>=1.24,<3.0
 pillow>=10.0
 pandas>=2.0
 pyyaml>=6.0
 tqdm>=4.65
 matplotlib>=3.7
+
+# --- Near-duplicate detection (pHash component split; config default deduplicate=true) ---
+imagehash>=4.0
 
 # --- App / UI ---
 streamlit>=1.30

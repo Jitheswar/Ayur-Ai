@@ -112,10 +112,13 @@ def build_dataloaders(cfg):
     class_names : list[str]
     """
     raw_dir = cfg.raw_dir
-    if not raw_dir.exists() or not any(raw_dir.iterdir()):
+    # Only count class sub-folders, so a lone .gitkeep (or stray files) doesn't
+    # read as "has data" and then fail confusingly inside ImageFolder.
+    class_dirs = [d for d in raw_dir.iterdir() if d.is_dir()] if raw_dir.exists() else []
+    if not class_dirs:
         raise FileNotFoundError(
-            f"No images found in {raw_dir}. Add one sub-folder of images per "
-            f"plant class first (see README / scripts/check_data.py)."
+            f"No class sub-folders found in {raw_dir}. Add one sub-folder of "
+            f"images per plant class first (see README / scripts/check_data.py)."
         )
 
     base = ImageFolder(str(raw_dir))  # no transform; subsets apply their own

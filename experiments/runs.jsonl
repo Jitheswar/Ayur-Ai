@@ -1,0 +1,1 @@
+{"tag": "baseline", "seed": 42, "backbone": "resnet18", "image_size": 224, "test_acc": 0.9964, "test_macro_f1": 0.996, "n_test": 274, "train_time_s": 74.6, "peak_gpu_alloc_gb": 0.902, "peak_gpu_reserved_gb": 1.313, "host_peak_gb": 3.11, "latency_gpu_ms": 1.91, "latency_cpu_ms": 14.53}

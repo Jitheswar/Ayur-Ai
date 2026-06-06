@@ -24,10 +24,12 @@ Trained on the **Mendeley Medicinal Leaf Dataset** — 30 species, 1,835 images
 |---------|-------|
 | Backbone | ResNet18 (ImageNet transfer learning) |
 | Hardware | NVIDIA RTX 3050 6 GB (CUDA) |
-| Training time | ~48 s (early-stopped at epoch 9) |
-| Best validation accuracy | **99.3 %** |
-| **Test accuracy** | **99.64 %** (273 / 274) |
+| Training time | ~1.2 min (early-stopped at epoch 13) |
+| Best validation accuracy | **99.64 %** (epoch 8) |
+| **Test accuracy** | **100 %** (274 / 274) |
 | Macro F1 (test) | **1.00** |
+
+Runs are reproducible (Python/NumPy/torch seeded from `config.yaml`).
 
 Per-class report and confusion matrix are written to `outputs/`. Example
 end-to-end prediction on a Tulsi leaf → `Ocimum Tenuiflorum (Tulsi)` at 95.2 %

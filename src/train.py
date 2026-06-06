@@ -36,20 +36,33 @@ def parse_args() -> argparse.Namespace:
 
 
 def args_to_overrides(args: argparse.Namespace) -> dict:
+    # Use ``is not None`` so explicit zeros (lr=0, epochs=0) are not dropped.
     o = {}
-    if args.backbone:
+    if args.backbone is not None:
         o["model.backbone"] = args.backbone
-    if args.freeze_backbone:
+    if args.freeze_backbone:  # store_true flag: only set when passed
         o["model.freeze_backbone"] = True
-    if args.epochs:
+    if args.epochs is not None:
         o["train.epochs"] = args.epochs
-    if args.lr:
+    if args.lr is not None:
         o["train.lr"] = args.lr
-    if args.batch_size:
+    if args.batch_size is not None:
         o["data.batch_size"] = args.batch_size
-    if args.image_size:
+    if args.image_size is not None:
         o["data.image_size"] = args.image_size
     return o
+
+
+def set_seed(seed: int) -> None:
+    """Seed Python, NumPy and torch (CPU + CUDA) for reproducible runs."""
+    import random
+
+    import numpy as np
+
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
 
 
 def run_epoch(model, loader, criterion, optimizer, device, train: bool):
@@ -76,6 +89,7 @@ def run_epoch(model, loader, criterion, optimizer, device, train: bool):
 def main() -> None:
     args = parse_args()
     cfg = Config.load(overrides=args_to_overrides(args))
+    set_seed(cfg.data.seed)
 
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
@@ -83,7 +97,10 @@ def main() -> None:
     loaders, class_names = build_dataloaders(cfg)
     n_train = len(loaders["train"].dataset)
     n_val = len(loaders["val"].dataset)
+    has_val = n_val > 0
     print(f"Classes: {len(class_names)} | train={n_train} val={n_val}")
+    if not has_val:
+        print("No validation split -- selecting the best model on train accuracy.")
 
     model = build_model(
         backbone=cfg.model.backbone,
@@ -101,7 +118,9 @@ def main() -> None:
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cfg.train.epochs)
 
     history = []
-    best_val_acc, epochs_no_improve = 0.0, 0
+    # Start below any real accuracy so the first epoch always checkpoints --
+    # this also guarantees a model is saved even when there is no val split.
+    best_metric, epochs_no_improve = -1.0, 0
     start = time.time()
 
     for epoch in range(1, cfg.train.epochs + 1):
@@ -118,22 +137,26 @@ def main() -> None:
             f"val loss {va_loss:.3f} acc {va_acc:.3f}"
         )
 
-        if va_acc > best_val_acc:
-            best_val_acc = va_acc
+        # Select on val accuracy when a val split exists, else on train accuracy.
+        metric = va_acc if has_val else tr_acc
+        if metric > best_metric:
+            best_metric = metric
             epochs_no_improve = 0
             save_checkpoint(
                 cfg.checkpoint_path, model, class_names, cfg,
-                extra={"val_acc": va_acc, "epoch": epoch},
+                extra={"val_acc": va_acc, "train_acc": tr_acc, "epoch": epoch},
             )
-            print(f"   ↳ saved new best model (val acc {va_acc:.3f})")
+            label = "val" if has_val else "train"
+            print(f"   ↳ saved new best model ({label} acc {metric:.3f})")
         else:
             epochs_no_improve += 1
             if epochs_no_improve >= cfg.train.early_stopping_patience:
-                print(f"Early stopping at epoch {epoch} (no val improvement).")
+                print(f"Early stopping at epoch {epoch} (no improvement).")
                 break
 
     elapsed = time.time() - start
-    print(f"\nDone in {elapsed/60:.1f} min. Best val acc: {best_val_acc:.3f}")
+    label = "val" if has_val else "train"
+    print(f"\nDone in {elapsed/60:.1f} min. Best {label} acc: {best_metric:.3f}")
     print(f"Best model: {cfg.checkpoint_path}")
 
     # Persist training history + class names for later inspection / plotting.

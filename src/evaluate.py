@@ -43,7 +43,10 @@ def main() -> None:
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
     ckpt_path = Path(args.checkpoint) if args.checkpoint else cfg.checkpoint_path
 
-    model, class_names, _ = load_checkpoint(ckpt_path, device)
+    model, class_names, meta = load_checkpoint(ckpt_path, device)
+    # Evaluate at the resolution the model was trained on, not whatever
+    # config.yaml currently says, so metrics aren't skewed by a size mismatch.
+    cfg.data.image_size = meta["image_size"]
     loaders, data_classes = build_dataloaders(cfg)
 
     if data_classes != class_names:

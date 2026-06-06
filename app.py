@@ -41,10 +41,14 @@ def get_retriever() -> PlantRetriever:
 
 
 @st.cache_resource(show_spinner=True)
-def get_predictor():
-    """Load the CNN predictor, or return None if no checkpoint exists yet."""
-    if not cfg.checkpoint_path.exists():
-        return None
+def get_predictor(_ckpt_mtime: float):
+    """Load the CNN predictor.
+
+    The checkpoint's mtime is part of the cache key, so retraining the model
+    (which rewrites best_model.pt) invalidates the cache and the new weights
+    are picked up without restarting the app. The caller only invokes this once
+    the checkpoint exists, so we never cache a "no model" state.
+    """
     from src.predict import LeafPredictor
 
     return LeafPredictor(cfg=cfg)
@@ -106,15 +110,15 @@ tab_identify, tab_search, tab_browse = st.tabs(
 # --------------------------------------------------------------------------- #
 with tab_identify:
     st.subheader("Upload a leaf image")
-    predictor = get_predictor()
 
-    if predictor is None:
+    if not cfg.checkpoint_path.exists():
         st.warning(
             "No trained model found at `models/best_model.pt`. "
             "Add a dataset under `data/raw/` and run `python -m src.train` first. "
             "Meanwhile, the **Search** and **Browse** tabs work fully."
         )
     else:
+        predictor = get_predictor(cfg.checkpoint_path.stat().st_mtime)
         topk = st.slider("How many candidate plants to show", 1, 5, 3)
         upload = st.file_uploader("Leaf image", type=["jpg", "jpeg", "png"])
         if upload is not None:
@@ -124,9 +128,16 @@ with tab_identify:
 
             import tempfile
 
-            tmp = Path(tempfile.gettempdir()) / "ayur_uploaded_leaf"
-            tmp.write_bytes(upload.getbuffer())
-            preds = predictor.predict(tmp, topk=topk)
+            # Unique temp file per upload so concurrent users don't clobber
+            # each other; removed once the prediction is done.
+            suffix = Path(upload.name).suffix or ".jpg"
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tf:
+                tf.write(upload.getbuffer())
+                tmp = Path(tf.name)
+            try:
+                preds = predictor.predict(tmp, topk=topk)
+            finally:
+                tmp.unlink(missing_ok=True)
 
             with col_res:
                 top = preds[0]

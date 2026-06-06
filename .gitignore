@@ -6,6 +6,9 @@ models/*
 outputs/*
 !outputs/.gitkeep
 
+# Experiment artifacts (keep journal.md, profile_run.py, runs.jsonl)
+experiments/*.log
+
 # Python
 __pycache__/
 *.py[cod]

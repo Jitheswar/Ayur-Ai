@@ -45,14 +45,16 @@ def build_model(
             weights=models.MobileNet_V2_Weights.DEFAULT if pretrained else None
         )
         in_features = net.classifier[-1].in_features
-        net.classifier[-1] = _head(in_features, num_classes, dropout)
+        # Replace the whole classifier (it already ends in Dropout+Linear) so we
+        # don't stack a second dropout on top of the backbone's own.
+        net.classifier = _head(in_features, num_classes, dropout)
         feature_params = (p for n, p in net.named_parameters() if not n.startswith("classifier."))
     else:  # efficientnet_b0
         net = models.efficientnet_b0(
             weights=models.EfficientNet_B0_Weights.DEFAULT if pretrained else None
         )
         in_features = net.classifier[-1].in_features
-        net.classifier[-1] = _head(in_features, num_classes, dropout)
+        net.classifier = _head(in_features, num_classes, dropout)
         feature_params = (p for n, p in net.named_parameters() if not n.startswith("classifier."))
 
     if freeze_backbone:
@@ -98,7 +100,10 @@ def load_checkpoint(path: str | Path, device: str | torch.device = "cpu"):
         raise FileNotFoundError(
             f"No trained model at {path}. Train one first: python -m src.train"
         )
-    ckpt = torch.load(path, map_location=device, weights_only=False)
+    # weights_only=True blocks arbitrary code execution from a malicious
+    # checkpoint. Our payload is only tensors + primitives (str/int/float/list),
+    # which the restricted unpickler allows.
+    ckpt = torch.load(path, map_location=device, weights_only=True)
     class_names = ckpt["class_names"]
     model = build_model(
         backbone=ckpt["backbone"],

@@ -45,14 +45,16 @@ def main() -> int:
     for d in class_dirs:
         n = sum(1 for f in d.iterdir() if f.suffix.lower() in IMAGE_EXTS)
         counts[d.name] = n
-        if kb.lookup(d.name) is None:
+        # Exact-alias match only: fuzzy matching would mask genuinely missing
+        # entries, so the coverage warning below would never fire.
+        if kb.lookup(d.name, fuzzy=False) is None:
             unmatched.append(d.name)
 
     total = sum(counts.values())
     print(f"Classes: {len(class_dirs)} | Total images: {total}\n")
     for name, n in counts.items():
         flag = "  ⚠ few images" if n < 10 else ""
-        matched = "" if kb.lookup(name) else "  ⚠ no KB entry"
+        matched = "" if kb.lookup(name, fuzzy=False) else "  ⚠ no KB entry"
         print(f"  {n:4d}  {name}{flag}{matched}")
 
     empty = [n for n, c in counts.items() if c == 0]

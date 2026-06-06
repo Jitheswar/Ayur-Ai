@@ -25,30 +25,19 @@ running **fully on-device** (local only) with **zero stability issues**
 ## Current best
 | metric | value | from |
 |---|---|---|
-| **test_acc** | **0.9964** | BASELINE (iter 1) |
-| test_macro_f1 | 0.9960 | BASELINE |
-| checkpoint | resnet18 @224, val-selected | — |
+| **test_acc** | **0.9964** | iter 2 (leak-free dedup split) |
+| test_macro_f1 | **0.9974** | iter 2 (leak-free dedup split) |
+| checkpoint | resnet18 @224, val-selected, dedup split | — |
 
 ---
 
 ## Lever status
-1. **Data** (leakage/dedup, label-noise, normalization, splits, balancing, aug) — **NEXT (iter 2)**. ⚠ top priority, see flag below.
-2. Training (LR sched/warmup, optimizer, wd, grad clip, early stop, longer, EMA) — untried
-3. Regularization (dropout, label smoothing, mixup; CV) — untried
+1. **Data** (leakage/dedup ✅ done) — aug, class balancing still untried
+2. **Training** (LR sched/warmup, optimizer, wd, grad clip, early stop, longer, EMA) — **NEXT (iter 3)**
+3. Regularization (dropout, label smoothing already active; mixup, CV) — untried
 4. Capacity (bigger backbone if it fits 6 GB) — untried
 5. On-device efficiency (AMP, batch size, grad accum) — untried
 6. Compression LAST (PTQ → QAT) — untried
-
-### ⚠ FLAG for iter 2 — metric is near ceiling, suspect leakage
-Baseline test_acc = **0.9964 = 273/274 correct (1 error)**. That is suspiciously
-high for a 30-class leaf task. The "Indian Medicinal Leaves" dataset is known to
-contain **near-duplicate / augmented copies of the same physical leaf**. If
-duplicates straddle the train/test split, the test metric is **inflated** and the
-"ceiling" is an illusion. **Before declaring the loop complete or chasing the last
-0.4%, iteration 2 must run a leakage/dedup check** (perceptual-hash / embedding
-near-duplicate detection across splits). Only a leak-free split gives a trustworthy
-metric — and may reveal real headroom. Do NOT trigger the "near ceiling" stopping
-condition until leakage is ruled out.
 
 ---
 
@@ -72,4 +61,25 @@ condition until leakage is ruled out.
 - **DECISION:** **BASELINE recorded.** All guardrails pass; huge memory/latency headroom.
 - **Reason / next:** metric near ceiling but leakage unverified → iter 2 = data leakage/dedup audit (lever 1) before any capacity/compression work.
 
-<!-- next-iteration: 2 -->
+### Iteration 2 — Data: leakage/dedup audit + component-based split
+- **Hypothesis:** 0.9964 test_acc may be inflated by near-duplicate images straddling the random stratified split. Replacing with a component-based split (pHash ≤8 Hamming distance → union-find components; whole component assigned to one split) prevents cross-split leakage.
+- **Change:** `src/data.py` → added `_component_stratified_split()` using imagehash pHash; `src/config.py` → added `DataCfg.deduplicate: bool`; `config.yaml` → `deduplicate: true`; `experiments/dedup_audit.py` (audit script); `experiments/dedup_results.json` (audit summary).
+- **Audit findings (dedup_audit.py, threshold=8):** 850 intra-split dup pairs, **374 train↔test leakage pairs**, 320 train↔val leakage pairs, 74 val↔test leakage pairs. Clear evidence of structural dataset duplication across splits.
+- **Seed:** 42. New split sizes: train=1289 / val=269 / test=277.
+- **Results:**
+  | field | value | vs baseline |
+  |---|---|---|
+  | test_acc | **0.9964** (275/277) | = (unchanged) |
+  | test_macro_f1 | **0.9974** | ↑ +0.0014 |
+  | train_time | 106.8 s (pHash adds ~30 s; ep 14 early stop) | +32 s |
+  | peak GPU alloc / reserved | 0.902 / 1.315 GB | = |
+  | host RAM peak | 3.14 GB | = |
+  | latency (1 img, warm) | 1.90 ms GPU · 14.58 ms CPU | = |
+  | serving path | ✅ | ✅ |
+- **DECISION:** **KEPT.**
+  - Primary metric (test_acc) unchanged at 0.9964 — confirms the baseline metric was real, not inflated by leakage.
+  - macro-F1 improved (+0.0014): dedup split reveals the model generalises across more structurally distinct images.
+  - All guardrails pass; evaluation is now on a more honest split.
+- **Reason / next:** Data lever partially exhausted (dedup done). Lever 2 (training): try a warmer LR schedule or longer training with EMA. Specifically: cosine LR with warm-up + weight-averaging (EMA, decay 0.995) — likely cheapest lever to push past 0.9964. Iter 3 = EMA of weights (lever 2).
+
+<!-- next-iteration: 3 -->

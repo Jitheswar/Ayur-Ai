@@ -31,6 +31,7 @@ class DataCfg:
     batch_size: int = 32
     num_workers: int = 4
     seed: int = 42
+    deduplicate: bool = False  # if True, group pHash near-duplicates into components before splitting (prevents cross-split leakage)
 
 
 @dataclass

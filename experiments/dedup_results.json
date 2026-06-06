@@ -1,0 +1,173 @@
+{
+  "threshold_hamming": 8,
+  "total_images": 1835,
+  "intra_split_dup_pairs": 850,
+  "cross_split_leak_pairs": 768,
+  "train_test_leak_pairs": 374,
+  "train_val_leak_pairs": 320,
+  "val_test_leak_pairs": 74,
+  "train_test_examples": [
+    {
+      "class": "Alpinia Galanga (Rasna)",
+      "path_a": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-001.jpg",
+      "path_b": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-005.jpg",
+      "split_a": "train",
+      "split_b": "test",
+      "hamming": 8
+    },
+    {
+      "class": "Alpinia Galanga (Rasna)",
+      "path_a": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-001.jpg",
+      "path_b": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-020.jpg",
+      "split_a": "train",
+      "split_b": "test",
+      "hamming": 6
+    },
+    {
+      "class": "Alpinia Galanga (Rasna)",
+      "path_a": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-001.jpg",
+      "path_b": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-027.jpg",
+      "split_a": "train",
+      "split_b": "test",
+      "hamming": 8
+    },
+    {
+      "class": "Alpinia Galanga (Rasna)",
+      "path_a": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-003.jpg",
+      "path_b": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-024.jpg",
+      "split_a": "train",
+      "split_b": "test",
+      "hamming": 8
+    },
+    {
+      "class": "Alpinia Galanga (Rasna)",
+      "path_a": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-003.jpg",
+      "path_b": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-026.jpg",
+      "split_a": "train",
+      "split_b": "test",
+      "hamming": 8
+    },
+    {
+      "class": "Alpinia Galanga (Rasna)",
+      "path_a": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-005.jpg",
+      "path_b": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-006.jpg",
+      "split_a": "test",
+      "split_b": "train",
+      "hamming": 8
+    },
+    {
+      "class": "Alpinia Galanga (Rasna)",
+      "path_a": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-005.jpg",
+      "path_b": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-007.jpg",
+      "split_a": "test",
+      "split_b": "train",
+      "hamming": 6
+    },
+    {
+      "class": "Alpinia Galanga (Rasna)",
+      "path_a": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-005.jpg",
+      "path_b": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-009.jpg",
+      "split_a": "test",
+      "split_b": "train",
+      "hamming": 4
+    },
+    {
+      "class": "Alpinia Galanga (Rasna)",
+      "path_a": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-005.jpg",
+      "path_b": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-011.jpg",
+      "split_a": "test",
+      "split_b": "train",
+      "hamming": 8
+    },
+    {
+      "class": "Alpinia Galanga (Rasna)",
+      "path_a": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-005.jpg",
+      "path_b": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-014.jpg",
+      "split_a": "test",
+      "split_b": "train",
+      "hamming": 8
+    }
+  ],
+  "train_val_examples": [
+    {
+      "class": "Alpinia Galanga (Rasna)",
+      "path_a": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-001.jpg",
+      "path_b": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-013.jpg",
+      "split_a": "train",
+      "split_b": "val",
+      "hamming": 8
+    },
+    {
+      "class": "Alpinia Galanga (Rasna)",
+      "path_a": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-002.jpg",
+      "path_b": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-004.jpg",
+      "split_a": "train",
+      "split_b": "val",
+      "hamming": 6
+    },
+    {
+      "class": "Alpinia Galanga (Rasna)",
+      "path_a": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-004.jpg",
+      "path_b": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-028.jpg",
+      "split_a": "val",
+      "split_b": "train",
+      "hamming": 8
+    },
+    {
+      "class": "Alpinia Galanga (Rasna)",
+      "path_a": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-004.jpg",
+      "path_b": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-031.jpg",
+      "split_a": "val",
+      "split_b": "train",
+      "hamming": 2
+    },
+    {
+      "class": "Alpinia Galanga (Rasna)",
+      "path_a": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-004.jpg",
+      "path_b": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-033.jpg",
+      "split_a": "val",
+      "split_b": "train",
+      "hamming": 4
+    },
+    {
+      "class": "Alpinia Galanga (Rasna)",
+      "path_a": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-004.jpg",
+      "path_b": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-038.jpg",
+      "split_a": "val",
+      "split_b": "train",
+      "hamming": 8
+    },
+    {
+      "class": "Alpinia Galanga (Rasna)",
+      "path_a": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-006.jpg",
+      "path_b": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-013.jpg",
+      "split_a": "train",
+      "split_b": "val",
+      "hamming": 8
+    },
+    {
+      "class": "Alpinia Galanga (Rasna)",
+      "path_a": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-007.jpg",
+      "path_b": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-013.jpg",
+      "split_a": "train",
+      "split_b": "val",
+      "hamming": 4
+    },
+    {
+      "class": "Alpinia Galanga (Rasna)",
+      "path_a": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-009.jpg",
+      "path_b": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-013.jpg",
+      "split_a": "train",
+      "split_b": "val",
+      "hamming": 2
+    },
+    {
+      "class": "Alpinia Galanga (Rasna)",
+      "path_a": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-011.jpg",
+      "path_b": "/home/jitheswar/ayur/data/raw/Alpinia Galanga (Rasna)/AG-S-013.jpg",
+      "split_a": "train",
+      "split_b": "val",
+      "hamming": 6
+    }
+  ]
+}

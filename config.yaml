@@ -14,6 +14,7 @@ data:
   batch_size: 32
   num_workers: 4
   seed: 42
+  deduplicate: true            # group near-duplicate images (pHash ≤8) into components; assign whole component to one split to prevent cross-split leakage
 
 model:
   # One of: resnet18, resnet50, mobilenet_v2, efficientnet_b0

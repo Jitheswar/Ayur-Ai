@@ -103,6 +103,82 @@ class _TransformedSubset(Dataset):
         return sample, target
 
 
+def _component_stratified_split(samples, val_split, test_split, seed, threshold=8):
+    """Like _stratified_split, but groups near-duplicate images (pHash Hamming ≤ threshold)
+    into components and assigns each component entirely to one split.
+
+    This prevents cross-split leakage caused by near-identical photos of the same leaf
+    appearing in both train and test.
+    """
+    import collections
+    import random
+
+    try:
+        import imagehash
+        from PIL import Image as PILImage
+    except ImportError:
+        raise ImportError("imagehash is required for deduplicate=true. Run: pip install imagehash")
+
+    # ── 1. Compute pHash for every image ──────────────────────────────────────
+    hashes: dict[int, object] = {}
+    for i, (path, _) in enumerate(samples):
+        try:
+            hashes[i] = imagehash.phash(PILImage.open(path).convert("RGB"), hash_size=8)
+        except Exception:
+            hashes[i] = imagehash.phash(PILImage.new("RGB", (8, 8)), hash_size=8)
+
+    # ── 2. Build duplicate graph per class; union-find to get components ───────
+    parent = list(range(len(samples)))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(x, y):
+        parent[find(x)] = find(y)
+
+    by_class: dict[int, list[int]] = collections.defaultdict(list)
+    for idx, (_, label) in enumerate(samples):
+        by_class[label].append(idx)
+
+    for label, idxs in by_class.items():
+        for ai in range(len(idxs)):
+            for bi in range(ai + 1, len(idxs)):
+                ia, ib = idxs[ai], idxs[bi]
+                if (hashes[ia] - hashes[ib]) <= threshold:
+                    union(ia, ib)
+
+    # ── 3. Group indices by (class, component_root) ───────────────────────────
+    comp_groups: dict[tuple[int, int], list[int]] = collections.defaultdict(list)
+    for idx, (_, label) in enumerate(samples):
+        comp_groups[(label, find(idx))].append(idx)
+
+    # ── 4. Assign each component to one split, stratified by class ─────────────
+    comps_by_class: dict[int, list[list[int]]] = collections.defaultdict(list)
+    for (label, _root), members in comp_groups.items():
+        comps_by_class[label].append(members)
+
+    rng = random.Random(seed)
+    train_idx, val_idx, test_idx = [], [], []
+
+    for label, comp_list in comps_by_class.items():
+        rng.shuffle(comp_list)
+        n = len(comp_list)
+        n_test = max(1, int(round(n * test_split)))
+        n_val  = max(1, int(round(n * val_split)))
+        n_val  = min(n_val, max(0, n - n_test - 1))
+        for members in comp_list[:n_test]:
+            test_idx.extend(members)
+        for members in comp_list[n_test:n_test + n_val]:
+            val_idx.extend(members)
+        for members in comp_list[n_test + n_val:]:
+            train_idx.extend(members)
+
+    return train_idx, val_idx, test_idx
+
+
 def build_dataloaders(cfg):
     """Build train/val/test dataloaders and return them with the class names.
 
@@ -126,9 +202,15 @@ def build_dataloaders(cfg):
     targets = [s[1] for s in base.samples]
 
     train_tf, eval_tf = build_transforms(cfg.data.image_size)
-    train_idx, val_idx, test_idx = _stratified_split(
-        targets, cfg.data.val_split, cfg.data.test_split, cfg.data.seed
-    )
+    deduplicate = getattr(cfg.data, "deduplicate", False)
+    if deduplicate:
+        train_idx, val_idx, test_idx = _component_stratified_split(
+            base.samples, cfg.data.val_split, cfg.data.test_split, cfg.data.seed
+        )
+    else:
+        train_idx, val_idx, test_idx = _stratified_split(
+            targets, cfg.data.val_split, cfg.data.test_split, cfg.data.seed
+        )
 
     datasets = {
         "train": _TransformedSubset(base, train_idx, train_tf),

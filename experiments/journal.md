@@ -36,10 +36,10 @@ running **fully on-device** (local only) with **zero stability issues**
 
 ## Lever status
 0. **Evaluation rigor** — ✅ DONE. determinism (iter 4), multi-seed band (iter 4), **component 5-fold CV canonical metric** (iter 5, pooled 0.9864±0.009), selection fixed → `val_acc_loss` (iter 5). All future levers judged on CV.
-1. **Data** (leakage/dedup ✅) — aug **← NEXT (iter 6)**; class balancing untried. dedup *threshold* = eval-definition knob, hold at 8 for metric stability (don't tune as a lever).
+1. **Data** (leakage/dedup ✅) — aug ✗ (iter 6: TrivialAugmentWide HURT 0.9864→0.9657, reverted; the hand-tuned standard aug is already well-fitted). class balancing untried (low EV — macro_f1 already 0.985). dedup *threshold* = eval-definition knob, hold at 8.
 2. **Training** — EMA ✗ (iter 3, reverted); `select_on=val_acc_loss` ✅ (iter 5). LR sched/warmup, optimizer, wd, grad clip, longer — untried
 3. Regularization (dropout, label smoothing already active; mixup, TTA) — untried
-4. Capacity (bigger backbone if it fits 6 GB) — untried
+4. Capacity (bigger backbone if it fits 6 GB) — **← NEXT (iter 7): efficientnet_b0** (higher ImageNet acc, fewer params than resnet18 → good for small-data transfer; fits budget easily)
 5. On-device efficiency (AMP, batch size, grad accum) — untried
 6. Compression LAST (PTQ → QAT) — untried
 
@@ -132,4 +132,17 @@ running **fully on-device** (local only) with **zero stability issues**
 - **DECISION: KEEP** all CV infra + `select_on=val_acc_loss`. Canonical metric is now **CV pooled acc 0.9864 / macro_f1 0.9849**. This is a *measurement* iteration — it doesn't raise model quality, it measures it honestly (~0.986) so future levers are judged past the noise.
 - **Reason / next → iter 6 (lever 1, Data: augmentation):** the residual error concentrates in hard near-dup components (fold 0). Stronger train-time augmentation is the cheapest lever to improve generalisation there; A/B it on the fixed CV metric (threshold held at 8 so the metric definition is stable).
 
-<!-- next-iteration: 6 -->
+### Iteration 6 — Data: stronger augmentation (TrivialAugmentWide) → REVERTED
+- **Hypothesis:** the residual error concentrates in hard near-dup components (fold 0); a stronger, standard augmentation policy (TrivialAugmentWide) should improve generalisation there and lift the CV metric past 0.9864.
+- **Change:** added config-gated `data.augment` (`standard` | `trivialaugment`); `trivialaugment` keeps the geometric framing (resized-crop + h-flip) but swaps the manual rotation/colour-jitter for `transforms.TrivialAugmentWide()`. Determinism preserved (seeded dataloader workers cover TA's RNG).
+- **Result — CV k=5, seed 42, val_acc_loss (same canonical protocol as iter 5):**
+  | aug | pooled acc | pooled macro_f1 | per-fold std | selected epochs |
+  |---|---|---|---|---|
+  | standard (baseline) | **0.9864** | **0.9849** | 0.0095 | [5,14,10,9,6] |
+  | trivialaugment | 0.9657 | 0.9609 | **0.0373** | [16,20,15,2,11] |
+  - **Δ pooled_acc = −0.0207, Δ macro_f1 = −0.0240; per-fold variance ~4× worse.**
+  - TA is too aggressive for this small, near-saturated transfer task: convergence slowed (selected epochs pushed much later), and fold 3 collapsed to 0.905 (selection grabbed epoch 2 on a now-noisy val). Net clearly worse.
+- **DECISION: REVERT** (`augment: standard`, restored byte-for-byte; TA code kept as opt-in). Canonical metric unchanged at **0.9864**. Served checkpoint untouched (cv_eval never writes one) and still serves ✅.
+- **Reason / next → iter 7 (lever 4, Capacity):** augmentation lever shows the existing aug is already well-tuned; stronger hurts. Next, try **efficientnet_b0** — higher ImageNet accuracy and *fewer* params than resnet18 (better small-data transfer), fits the 6 GB budget with huge headroom — CV-evaluated against 0.9864.
+
+<!-- next-iteration: 7 -->

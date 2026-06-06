@@ -27,15 +27,35 @@ IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]
 
 
-def build_transforms(image_size: int):
-    """Return (train_transform, eval_transform)."""
-    train_tf = transforms.Compose(
-        [
+def build_transforms(image_size: int, augment: str = "standard"):
+    """Return (train_transform, eval_transform).
+
+    ``augment``:
+      * ``"standard"`` — hand-tuned crop/flip/rotation/colour-jitter (original).
+      * ``"trivialaugment"`` — keep the geometric framing (resized crop + h-flip)
+        but delegate the rest to ``TrivialAugmentWide`` (parameter-free, current
+        standard for small-data transfer learning; subsumes rotation/colour).
+    """
+    if augment == "trivialaugment":
+        geom = [
+            transforms.Resize((image_size + 32, image_size + 32)),
+            transforms.RandomResizedCrop(image_size, scale=(0.7, 1.0)),
+            transforms.RandomHorizontalFlip(),
+            transforms.TrivialAugmentWide(),
+        ]
+    elif augment == "standard":
+        geom = [
             transforms.Resize((image_size + 32, image_size + 32)),
             transforms.RandomResizedCrop(image_size, scale=(0.7, 1.0)),
             transforms.RandomHorizontalFlip(),
             transforms.RandomRotation(20),
             transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+        ]
+    else:
+        raise ValueError(f"unknown augment mode: {augment!r}")
+
+    train_tf = transforms.Compose(
+        geom + [
             transforms.ToTensor(),
             transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
         ]
@@ -298,7 +318,9 @@ def build_dataloaders(cfg, splits=None):
     class_names = base.classes
     targets = [s[1] for s in base.samples]
 
-    train_tf, eval_tf = build_transforms(cfg.data.image_size)
+    train_tf, eval_tf = build_transforms(
+        cfg.data.image_size, augment=getattr(cfg.data, "augment", "standard")
+    )
     if splits is not None:
         train_idx, val_idx, test_idx = splits
     elif getattr(cfg.data, "deduplicate", False):

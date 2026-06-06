@@ -32,6 +32,7 @@ class DataCfg:
     num_workers: int = 4
     seed: int = 42
     deduplicate: bool = False  # if True, group pHash near-duplicates into components before splitting (prevents cross-split leakage)
+    augment: str = "standard"  # train-time augmentation: "standard" | "trivialaugment"
 
 
 @dataclass

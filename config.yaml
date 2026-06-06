@@ -15,6 +15,7 @@ data:
   num_workers: 4
   seed: 42
   deduplicate: true            # group near-duplicate images (pHash ≤8) into components; assign whole component to one split to prevent cross-split leakage
+  augment: standard            # iter6: TrivialAugmentWide HURT (CV 0.9864->0.9657, var 4x worse), reverted. Code kept as opt-in.
 
 model:
   # One of: resnet18, resnet50, mobilenet_v2, efficientnet_b0

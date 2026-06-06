@@ -105,15 +105,17 @@ class _TransformedSubset(Dataset):
         return sample, target
 
 
-def _component_stratified_split(samples, val_split, test_split, seed, threshold=8):
-    """Like _stratified_split, but groups near-duplicate images (pHash Hamming ≤ threshold)
-    into components and assigns each component entirely to one split.
+def _components_by_class(samples, threshold=8):
+    """Group near-duplicate images (pHash Hamming ≤ threshold) into connected
+    components, per class. Returns ``{label: [[idx, ...], ...]}`` — for each
+    class a list of components, each a list of image indices.
 
-    This prevents cross-split leakage caused by near-identical photos of the same leaf
-    appearing in both train and test.
+    pHashes are disk-cached (the dataset is static, so a hash never changes),
+    making repeated splits skip the ~30 s hashing pass. Shared by the single
+    dedup split and the CV splitter so both see identical component structure.
     """
     import collections
-    import random
+    import json
 
     try:
         import imagehash
@@ -121,11 +123,7 @@ def _component_stratified_split(samples, val_split, test_split, seed, threshold=
     except ImportError:
         raise ImportError("imagehash is required for deduplicate=true. Run: pip install imagehash")
 
-    # ── 1. Compute pHash for every image (disk-cached; the dataset is static) ──
-    # Caching makes repeated splits (e.g. the multi-seed evaluator) skip the
-    # ~30 s hashing pass — the hash depends only on the image file, not the seed.
-    import json
-
+    # ── 1. Compute pHash for every image (disk-cached) ────────────────────────
     cache_path = ROOT / "experiments" / ".phash_cache.json"
     try:
         cache = json.loads(cache_path.read_text()) if cache_path.exists() else {}
@@ -182,11 +180,61 @@ def _component_stratified_split(samples, val_split, test_split, seed, threshold=
     for idx, (_, label) in enumerate(samples):
         comp_groups[(label, find(idx))].append(idx)
 
-    # ── 4. Assign each component to one split, stratified by class ─────────────
+    # ── 4. Collect components per class ───────────────────────────────────────
     comps_by_class: dict[int, list[list[int]]] = collections.defaultdict(list)
     for (label, _root), members in comp_groups.items():
         comps_by_class[label].append(members)
 
+    return comps_by_class
+
+
+def component_kfold(samples, k, seed, threshold=8):
+    """Class-stratified, leak-free K-fold over near-duplicate components.
+
+    Returns a list of ``k`` folds, each a list of image indices. Every component
+    (near-duplicate group) lands wholly in one fold, so no fold shares a physical
+    leaf with another. Within each class, components are assigned greedily to the
+    currently-smallest fold (largest component first) — balancing both component
+    count *and* image count per fold, which keeps every class present in every
+    fold (requires #components ≥ k per class; min here is 5, so k≤5 is safe).
+
+    The pooled prediction over all k held-out folds — each image tested exactly
+    once by a model that never saw its component — is the canonical low-variance
+    metric (vs. the high-variance single random split; see journal iters 3–4).
+    """
+    import random
+
+    comps_by_class = _components_by_class(samples, threshold)
+    rng = random.Random(seed)
+    folds: list[list[int]] = [[] for _ in range(k)]
+    load = [0] * k  # GLOBAL image count per fold (carried across classes)
+
+    for label in sorted(comps_by_class):
+        comp_list = comps_by_class[label]
+        rng.shuffle(comp_list)                      # randomise equal-size ties
+        comp_list.sort(key=len, reverse=True)       # then assign largest first
+        class_count = [0] * k                       # components of THIS class per fold
+        for members in comp_list:
+            # Primary: keep each class evenly spread (fewest of this class) so
+            # every fold has every class. Tie-break: smallest GLOBAL load, so a
+            # class's giant component avoids folds already heavy with other
+            # classes' giants — keeping fold sizes balanced.
+            f = min(range(k), key=lambda i: (class_count[i], load[i], i))
+            folds[f].extend(members)
+            load[f] += len(members)
+            class_count[f] += 1
+
+    return folds
+
+
+def _component_stratified_split(samples, val_split, test_split, seed, threshold=8):
+    """Stratified train/val/test split that assigns each near-duplicate component
+    entirely to one split — preventing cross-split leakage from near-identical
+    photos of the same physical leaf.
+    """
+    import random
+
+    comps_by_class = _components_by_class(samples, threshold)
     rng = random.Random(seed)
     train_idx, val_idx, test_idx = [], [], []
 
@@ -221,8 +269,15 @@ def _seed_worker(worker_id):
     _random.seed(s)
 
 
-def build_dataloaders(cfg):
+def build_dataloaders(cfg, splits=None):
     """Build train/val/test dataloaders and return them with the class names.
+
+    Parameters
+    ----------
+    splits : optional ``(train_idx, val_idx, test_idx)`` of image indices into the
+        ImageFolder. When given, these are used verbatim (e.g. by the CV harness)
+        instead of computing a split from ``cfg.data.seed``. Train gets the
+        augmenting transform; val/test get the eval transform.
 
     Returns
     -------
@@ -244,8 +299,9 @@ def build_dataloaders(cfg):
     targets = [s[1] for s in base.samples]
 
     train_tf, eval_tf = build_transforms(cfg.data.image_size)
-    deduplicate = getattr(cfg.data, "deduplicate", False)
-    if deduplicate:
+    if splits is not None:
+        train_idx, val_idx, test_idx = splits
+    elif getattr(cfg.data, "deduplicate", False):
         train_idx, val_idx, test_idx = _component_stratified_split(
             base.samples, cfg.data.val_split, cfg.data.test_split, cfg.data.seed
         )

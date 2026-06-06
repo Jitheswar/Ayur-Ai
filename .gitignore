@@ -6,10 +6,13 @@ models/*
 outputs/*
 !outputs/.gitkeep
 
-# Experiment artifacts (keep journal.md, profile_run.py, runs.jsonl)
+# Experiment artifacts (keep journal.md, harnesses, *.jsonl results)
+# NOTE: .gitignore has no inline comments — patterns must be on their own line.
 experiments/*.log
-experiments/error_analysis.json   # regenerated per-checkpoint diagnostic; findings go in journal.md
-experiments/.phash_cache.json     # cached perceptual hashes (speeds repeated dedup splits)
+# regenerated per-checkpoint diagnostic; findings go in journal.md
+experiments/error_analysis.json
+# cached perceptual hashes (speeds repeated dedup splits)
+experiments/.phash_cache.json
 
 # Python
 __pycache__/

@@ -22,21 +22,22 @@ running **fully on-device** (local only) with **zero stability issues**
 
 ---
 
-## Current best (honest, multi-seed — iter 4)
+## Current best — CANONICAL METRIC = component 5-fold CV (iter 5)
 | metric | value | from |
 |---|---|---|
-| **test_acc** | **0.968 ± 0.054** (5 seeds; range 0.872–1.000) | iter 4 multiseed |
-| test_macro_f1 | **0.968 ± 0.036** (range 0.907–1.000) | iter 4 multiseed |
-| seed-42 (deterministic) | test_acc 0.9892 / macro_f1 0.9886 | iter 4 |
-| checkpoint | resnet18 @224, val-acc-selected, dedup split | — |
-| ⚠ status | single 0.9964 was a lucky draw. Determinism now fixed (same seed → identical ckpt). High std is intrinsic: **correlated errors within near-dup components** (few independent test units). Canonical metric → StratifiedGroupKFold CV in **iter 5**. | — |
+| **CV pooled test_acc** | **0.9864** (per-fold std 0.0093) | iter 5 CV, select_on=val_acc_loss |
+| **CV pooled macro_f1** | **0.9849** | iter 5 CV |
+| served checkpoint (single dedup split, seed 42) | test_acc 0.9928 / macro_f1 0.9912 (one draw) | iter 5 |
+| recipe | resnet18 @224, dedup (pHash≤8) split, **val_acc_loss** selection, deterministic | — |
+| how to reproduce the metric | `.venv/bin/python -m experiments.cv_eval --k 5 --seed 42` | — |
+| ⚠ noise context | single-split test_acc is noise-limited (multi-seed 0.968±0.054, range 0.872–1.0). **Judge all future levers on the CV pooled number, not a single split.** | — |
 
 ---
 
 ## Lever status
-0. **Evaluation rigor** — determinism ✅ (iter 4, reproducibility guardrail restored); honest multi-seed band ✅ (0.968±0.054). **NEXT (iter 5): StratifiedGroupKFold CV** for a stable pooled metric + test selection-on-val-loss. Must precede further lever claims.
-1. **Data** (leakage/dedup ✅ done) — dedup threshold (component sizes), aug, class balancing still untried
-2. **Training** — EMA ✗ (iter 3: hurt, 0.9964→0.9892, reverted). `select_on` flag added (val_acc default; val_acc_loss to test in iter 5). LR sched/warmup, optimizer, wd, longer — untried
+0. **Evaluation rigor** — ✅ DONE. determinism (iter 4), multi-seed band (iter 4), **component 5-fold CV canonical metric** (iter 5, pooled 0.9864±0.009), selection fixed → `val_acc_loss` (iter 5). All future levers judged on CV.
+1. **Data** (leakage/dedup ✅) — aug **← NEXT (iter 6)**; class balancing untried. dedup *threshold* = eval-definition knob, hold at 8 for metric stability (don't tune as a lever).
+2. **Training** — EMA ✗ (iter 3, reverted); `select_on=val_acc_loss` ✅ (iter 5). LR sched/warmup, optimizer, wd, grad clip, longer — untried
 3. Regularization (dropout, label smoothing already active; mixup, TTA) — untried
 4. Capacity (bigger backbone if it fits 6 GB) — untried
 5. On-device efficiency (AMP, batch size, grad accum) — untried
@@ -113,4 +114,22 @@ running **fully on-device** (local only) with **zero stability issues**
 - **DECISION: KEEP** all infra. The honest current metric is **test_acc ≈ 0.97 ± 0.05**, *not* the 0.9964 the loop chased through iter 3. The iter-2 "metric is real, not inflated" note is hereby **corrected** — it was a single noisy draw.
 - **Reason / next → iter 5:** adopt **StratifiedGroupKFold CV** over components (every component tested once; pooled acc/F1 + per-fold mean±std) as the canonical metric, and within it A/B the `select_on=val_acc_loss` selection fix. Only then resume model levers, judged against a metric that can see past the noise.
 
-<!-- next-iteration: 5 -->
+### Iteration 5 — Evaluation rigor: component K-fold CV (canonical metric) + selection A/B
+- **Hypothesis:** a component-grouped K-fold CV — every near-duplicate component held out exactly once — yields a stable, low-variance metric that replaces the noisy single split, and lets `val_acc` vs `val_acc_loss` be compared cleanly.
+- **Changes (all additive / reversible):**
+  - `src/data.py`: new `component_kfold(samples, k, seed, threshold=8)` — class-stratified, **size-balanced** (largest-component-first greedy with a global-load tie-break), leak-free folds. Validated: disjoint+complete partition, **0 components span folds**, every class in every fold, deterministic, balanced sizes `[366,388,366,358,357]`. Also `build_dataloaders(cfg, splits=...)` to inject explicit indices through the real loader/transform path.
+  - `experiments/cv_eval.py`: K=5 rotation (`test=fold i, val=fold i+1, train=rest`). Trains each fold the FULL 20-epoch budget while recording per-epoch (val_acc, val_loss) + the test-fold predictions, then **offline-replays the production selection+early-stop logic** (`src.train._selection_metric`) per strategy and pools predictions → one set of training runs gives both strategies, with **no test peeking ever feeding training**.
+  - `config.yaml`: `select_on: val_acc → val_acc_loss` (kept; see result).
+- **Result — k=5, seed 42, resnet18/dedup/deterministic (every one of 1835 imgs tested once):**
+  | selection | **pooled acc** | pooled macro_f1 | per-fold std | selected epochs |
+  |---|---|---|---|---|
+  | val_acc | 0.9858 | 0.9844 | 0.0093 | [5,9,10,9,6] |
+  | **val_acc_loss** | **0.9864** | **0.9849** | 0.0095 | [5,**14**,10,9,6] |
+  - **CV variance is ~6× tighter** than the single split (per-fold std 0.009 vs multi-seed 0.054). Pooled **0.986** is the honest central estimate — between the lucky single draw (0.9964) and the noisy multi-seed mean (0.9676).
+  - **Fold 0 is the hard fold** (acc 0.970): it holds the giant near-dup components (Alpinia 46-img, etc.) tested against few distinct train examples; folds 1–4 are 0.987–0.994. Confirms the iter-4 correlated-error diagnosis exactly.
+  - **val_acc_loss weakly dominates** val_acc (paired: identical pick on 4/5 folds, better on fold 1 — epoch 14 vs 9, the lower-val-loss epoch generalised better; pooled +0.0006 ≈ 1 image). Free, never worse, principled on the saturated val plateau.
+- **Served checkpoint:** retrained on the production single split with val_acc_loss → test_acc **0.9928** (275/277), macro_f1 0.9912. Guardrails: train 124 s (full 20 ep — val_acc_loss keeps improving, no early stop), peak GPU **0.95/1.53 GB** (≤6), host RAM 3.1 GB, latency **1.96 ms** GPU / 13.9 ms CPU, serving path loads+predicts ✅, reproducible ✅.
+- **DECISION: KEEP** all CV infra + `select_on=val_acc_loss`. Canonical metric is now **CV pooled acc 0.9864 / macro_f1 0.9849**. This is a *measurement* iteration — it doesn't raise model quality, it measures it honestly (~0.986) so future levers are judged past the noise.
+- **Reason / next → iter 6 (lever 1, Data: augmentation):** the residual error concentrates in hard near-dup components (fold 0). Stronger train-time augmentation is the cheapest lever to improve generalisation there; A/B it on the fixed CV metric (threshold held at 8 so the metric definition is stable).
+
+<!-- next-iteration: 6 -->

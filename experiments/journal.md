@@ -22,21 +22,22 @@ running **fully on-device** (local only) with **zero stability issues**
 
 ---
 
-## Current best
+## Current best (honest, multi-seed — iter 4)
 | metric | value | from |
 |---|---|---|
-| **test_acc** | **0.978 – 1.000** (single-run; ⚠ NOT reproducible) | iters 1–3 |
-| test_macro_f1 | 0.975 – 1.000 | iters 1–3 |
+| **test_acc** | **0.968 ± 0.054** (5 seeds; range 0.872–1.000) | iter 4 multiseed |
+| test_macro_f1 | **0.968 ± 0.036** (range 0.907–1.000) | iter 4 multiseed |
+| seed-42 (deterministic) | test_acc 0.9892 / macro_f1 0.9886 | iter 4 |
 | checkpoint | resnet18 @224, val-acc-selected, dedup split | — |
-| ⚠ status | single-split metric is **noise-limited** (1 test error = 0.0036); identical config+seed gave 0.9964 then 0.9783. Honest mean±std pending **iter 4**. | — |
+| ⚠ status | single 0.9964 was a lucky draw. Determinism now fixed (same seed → identical ckpt). High std is intrinsic: **correlated errors within near-dup components** (few independent test units). Canonical metric → StratifiedGroupKFold CV in **iter 5**. | — |
 
 ---
 
 ## Lever status
-0. **Evaluation rigor** — ⚠ single-split metric found NON-reproducible (iter 3). **NEXT (iter 4): determinism + multi-seed mean±std + fix saturated-val selection.** Must precede any further lever claims.
-1. **Data** (leakage/dedup ✅ done) — aug, class balancing still untried
-2. **Training** — EMA ✗ (iter 3: hurt, 0.9964→0.9892, reverted). LR sched/warmup, optimizer, wd, grad clip, selection-on-val-loss, longer — untried
-3. Regularization (dropout, label smoothing already active; mixup, CV) — untried
+0. **Evaluation rigor** — determinism ✅ (iter 4, reproducibility guardrail restored); honest multi-seed band ✅ (0.968±0.054). **NEXT (iter 5): StratifiedGroupKFold CV** for a stable pooled metric + test selection-on-val-loss. Must precede further lever claims.
+1. **Data** (leakage/dedup ✅ done) — dedup threshold (component sizes), aug, class balancing still untried
+2. **Training** — EMA ✗ (iter 3: hurt, 0.9964→0.9892, reverted). `select_on` flag added (val_acc default; val_acc_loss to test in iter 5). LR sched/warmup, optimizer, wd, longer — untried
+3. Regularization (dropout, label smoothing already active; mixup, TTA) — untried
 4. Capacity (bigger backbone if it fits 6 GB) — untried
 5. On-device efficiency (AMP, batch size, grad accum) — untried
 6. Compression LAST (PTQ → QAT) — untried
@@ -93,4 +94,23 @@ running **fully on-device** (local only) with **zero stability issues**
 - **Guardrails:** all green throughout (EMA peak GPU 0.95 GB; latency 1.9 ms; serving loads fine). Stability ✅ *except reproducibility*, now the top priority.
 - **Reason / next → iter 4 (lever 0, evaluation rigor):** (a) add determinism (cudnn deterministic + seeded DataLoader workers) so a seed is reproducible; (b) **multi-seed eval → report mean±std** test_acc/macro_f1 as the honest metric; (c) fix selection on the saturated-val plateau (select on val *loss*, which keeps decreasing). Only then resume levers with a metric that can tell signal from noise.
 
-<!-- next-iteration: 4 -->
+### Iteration 4 — Evaluation rigor: determinism + honest multi-seed metric
+- **Hypothesis:** the single-split metric is noise; a reproducible setup + multi-seed mean±std will give the honest number.
+- **Changes (all reversible / additive):**
+  - `src/train.py set_seed`: cuDNN deterministic + `use_deterministic_algorithms(warn_only)` + CUBLAS env → **reproducibility restored** (two identical-seed runs now produce **byte-identical** checkpoints, sha `c4ea38…`). This was a *failing guardrail*.
+  - Refactored `main()` → reusable **`train_model(cfg, device)`**; `main` now thin.
+  - `src/data.py`: seeded DataLoader workers (`worker_init_fn`) + **pHash disk cache** (`experiments/.phash_cache.json`) so repeated splits skip the ~30 s hash pass.
+  - Added config-driven **`select_on`** (`val_acc` default = original behaviour; `val_acc_loss` = loss tie-break, to test in iter 5).
+  - New `experiments/multiseed_eval.py` (trains+evals K seeds → mean±std; appends `experiments/multiseed.jsonl`).
+- **Result — 5 seeds [42,0,1,2,3], resnet18 / dedup / val_acc / deterministic:**
+  | metric | mean | std | min | max |
+  |---|---|---|---|---|
+  | test_acc | **0.9676** | 0.0539 | 0.8716 (seed 3) | 1.0000 (seed 0) |
+  | macro_f1 | **0.9682** | 0.0362 | 0.9069 | 1.0000 |
+  - Per-seed `n_test` ranged **233–323** (uneven — components, not images, are split).
+  - Determinism cost: negligible (~75–110 s/run); guardrails all green.
+- **Diagnosis of the variance (key):** *not* class starvation — every seed keeps ≥3 train imgs/class, no empty classes. The spread comes from **near-duplicate components**: kept-together duplicates make test errors **correlated** (a hard component fails as a block), so the effective number of independent test units ≈ component count, not 1835. Seed 3's `macro_f1 (0.907) > acc (0.872)` confirms errors concentrate in a few large-support (large-component) classes.
+- **DECISION: KEEP** all infra. The honest current metric is **test_acc ≈ 0.97 ± 0.05**, *not* the 0.9964 the loop chased through iter 3. The iter-2 "metric is real, not inflated" note is hereby **corrected** — it was a single noisy draw.
+- **Reason / next → iter 5:** adopt **StratifiedGroupKFold CV** over components (every component tested once; pooled acc/F1 + per-fold mean±std) as the canonical metric, and within it A/B the `select_on=val_acc_loss` selection fix. Only then resume model levers, judged against a metric that can see past the noise.
+
+<!-- next-iteration: 5 -->

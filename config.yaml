@@ -32,6 +32,7 @@ train:
   checkpoint_path: models/best_model.pt
   ema: false                 # EMA tried in iter3 — it HURT (test_acc 0.9964→0.9892); left off. Code kept as opt-in.
   ema_decay: 0.995           # (only used when ema: true)
+  select_on: val_acc         # checkpoint selection metric: val_acc | val_acc_loss
 
 nlp:
   knowledge_base: data/knowledge_base/plants.json

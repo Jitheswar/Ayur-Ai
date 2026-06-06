@@ -52,6 +52,7 @@ class TrainCfg:
     checkpoint_path: str = "models/best_model.pt"
     ema: bool = False          # if True, keep an EMA of weights and select/serve the EMA model
     ema_decay: float = 0.999   # EMA decay; effective averaging window ~ 1/(1-decay) steps
+    select_on: str = "val_acc" # checkpoint selection: "val_acc" | "val_acc_loss" (loss tie-break)
 
 
 @dataclass

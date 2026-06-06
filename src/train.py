@@ -54,15 +54,33 @@ def args_to_overrides(args: argparse.Namespace) -> dict:
 
 
 def set_seed(seed: int) -> None:
-    """Seed Python, NumPy and torch (CPU + CUDA) for reproducible runs."""
+    """Seed Python, NumPy and torch, and enable deterministic kernels.
+
+    Reproducibility is a hard project guardrail. cuDNN's default autotuner picks
+    nondeterministic algorithms, which — feeding a *saturated* val set — made the
+    checkpointed epoch (and therefore the test metric) swing run-to-run between
+    ~0.978 and 1.000 for an identical config+seed (see journal iter 3). We trade
+    the autotuner for deterministic kernels; the small speed cost is worth a
+    metric we can actually trust. ``warn_only=True`` keeps any op lacking a
+    deterministic implementation from hard-crashing the run.
+    """
+    import os
     import random
 
     import numpy as np
 
+    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+    os.environ.setdefault("PYTHONHASHSEED", str(seed))
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    try:
+        torch.use_deterministic_algorithms(True, warn_only=True)
+    except Exception:
+        pass
 
 
 def run_epoch(model, loader, criterion, optimizer, device, train: bool, ema_model=None):
@@ -88,21 +106,23 @@ def run_epoch(model, loader, criterion, optimizer, device, train: bool, ema_mode
     return loss_sum / max(total, 1), correct / max(total, 1)
 
 
-def main() -> None:
-    args = parse_args()
-    cfg = Config.load(overrides=args_to_overrides(args))
-    set_seed(cfg.data.seed)
+def train_model(cfg, device, verbose: bool = True) -> dict:
+    """Train per ``cfg`` on ``device``, saving the best checkpoint to
+    ``cfg.checkpoint_path``. Returns a result dict (history, class_names,
+    best_metric, best_epoch, timings).
 
-    device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Device: {device}")
-
+    Pure training only: the caller owns ``set_seed()`` and any artifact writing
+    (history JSON / plots). Extracted from ``main()`` so the multi-seed evaluator
+    can drive the *real* training loop instead of a copy.
+    """
     loaders, class_names = build_dataloaders(cfg)
     n_train = len(loaders["train"].dataset)
     n_val = len(loaders["val"].dataset)
     has_val = n_val > 0
-    print(f"Classes: {len(class_names)} | train={n_train} val={n_val}")
-    if not has_val:
-        print("No validation split -- selecting the best model on train accuracy.")
+    if verbose:
+        print(f"Classes: {len(class_names)} | train={n_train} val={n_val}")
+        if not has_val:
+            print("No validation split -- selecting the best model on train accuracy.")
 
     model = build_model(
         backbone=cfg.model.backbone,
@@ -133,12 +153,13 @@ def main() -> None:
             return decay * avg_p + (1.0 - decay) * cur_p
 
         ema_model = AveragedModel(model, avg_fn=_ema_avg, use_buffers=True)
-        print(f"EMA enabled (decay={decay}); selecting + serving the EMA weights.")
+        if verbose:
+            print(f"EMA enabled (decay={decay}); selecting + serving the EMA weights.")
 
     history = []
     # Start below any real accuracy so the first epoch always checkpoints --
     # this also guarantees a model is saved even when there is no val split.
-    best_metric, epochs_no_improve = -1.0, 0
+    best_metric, best_epoch, epochs_no_improve = -1.0, 0, 0
     start = time.time()
 
     for epoch in range(1, cfg.train.epochs + 1):
@@ -153,40 +174,85 @@ def main() -> None:
             {"epoch": epoch, "train_loss": tr_loss, "train_acc": tr_acc,
              "val_loss": va_loss, "val_acc": va_acc}
         )
-        print(
-            f"Epoch {epoch:02d}/{cfg.train.epochs} | "
-            f"train loss {tr_loss:.3f} acc {tr_acc:.3f} | "
-            f"val loss {va_loss:.3f} acc {va_acc:.3f}"
-        )
+        if verbose:
+            print(
+                f"Epoch {epoch:02d}/{cfg.train.epochs} | "
+                f"train loss {tr_loss:.3f} acc {tr_acc:.3f} | "
+                f"val loss {va_loss:.3f} acc {va_acc:.3f}"
+            )
 
-        # Select on val accuracy when a val split exists, else on train accuracy.
-        metric = va_acc if has_val else tr_acc
+        # Checkpoint-selection metric (higher=better). Strategy is config-driven
+        # so iterations stay comparable: "val_acc" = original behaviour;
+        # "val_acc_loss" additionally breaks the saturated-val plateau by loss.
+        metric = _selection_metric(
+            va_acc, va_loss, tr_acc, tr_loss, has_val,
+            strategy=getattr(cfg.train, "select_on", "val_acc"),
+        )
         if metric > best_metric:
             best_metric = metric
+            best_epoch = epoch
             epochs_no_improve = 0
             save_checkpoint(
                 cfg.checkpoint_path, eval_model, class_names, cfg,
                 extra={"val_acc": va_acc, "train_acc": tr_acc, "epoch": epoch},
             )
-            label = "val" if has_val else "train"
-            print(f"   ↳ saved new best model ({label} acc {metric:.3f})")
+            if verbose:
+                label = "val" if has_val else "train"
+                print(f"   ↳ saved new best model ({label} acc {va_acc if has_val else tr_acc:.3f})")
         else:
             epochs_no_improve += 1
             if epochs_no_improve >= cfg.train.early_stopping_patience:
-                print(f"Early stopping at epoch {epoch} (no improvement).")
+                if verbose:
+                    print(f"Early stopping at epoch {epoch} (no improvement).")
                 break
 
     elapsed = time.time() - start
-    label = "val" if has_val else "train"
-    print(f"\nDone in {elapsed/60:.1f} min. Best {label} acc: {best_metric:.3f}")
+    return {
+        "history": history,
+        "class_names": class_names,
+        "best_metric": best_metric,
+        "best_epoch": best_epoch,
+        "n_train": n_train,
+        "n_val": n_val,
+        "elapsed": elapsed,
+    }
+
+
+def _selection_metric(va_acc, va_loss, tr_acc, tr_loss, has_val, strategy="val_acc") -> float:
+    """Single scalar (higher=better) used to pick the checkpoint.
+
+    ``val_acc`` (default): accuracy only — the original behaviour.
+    ``val_acc_loss``: accuracy minus a small ``loss`` term, so on a saturated val
+    set (many epochs at acc=1.0) we keep the *lowest-loss* (best-calibrated) one
+    instead of an arbitrary first-to-plateau epoch.
+    """
+    acc, loss = (va_acc, va_loss) if has_val else (tr_acc, tr_loss)
+    if strategy == "val_acc_loss":
+        return acc - 1e-3 * loss
+    return acc
+
+
+def main() -> None:
+    args = parse_args()
+    cfg = Config.load(overrides=args_to_overrides(args))
+    set_seed(cfg.data.seed)
+
+    device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Device: {device}")
+
+    result = train_model(cfg, device, verbose=True)
+
+    label = "val" if result["n_val"] > 0 else "train"
+    print(f"\nDone in {result['elapsed']/60:.1f} min. Best {label} sel-metric: "
+          f"{result['best_metric']:.4f} (epoch {result['best_epoch']})")
     print(f"Best model: {cfg.checkpoint_path}")
 
     # Persist training history + class names for later inspection / plotting.
     out_dir = ROOT / "outputs"
     out_dir.mkdir(exist_ok=True)
-    (out_dir / "history.json").write_text(json.dumps(history, indent=2))
-    (out_dir / "class_names.json").write_text(json.dumps(class_names, indent=2))
-    _maybe_plot(history, out_dir)
+    (out_dir / "history.json").write_text(json.dumps(result["history"], indent=2))
+    (out_dir / "class_names.json").write_text(json.dumps(result["class_names"], indent=2))
+    _maybe_plot(result["history"], out_dir)
 
 
 def _maybe_plot(history, out_dir: Path) -> None:

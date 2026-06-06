@@ -20,6 +20,8 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 from torchvision.datasets import ImageFolder
 
+from .config import ROOT
+
 # ImageNet statistics -- correct because we use ImageNet-pretrained backbones.
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]
@@ -119,13 +121,38 @@ def _component_stratified_split(samples, val_split, test_split, seed, threshold=
     except ImportError:
         raise ImportError("imagehash is required for deduplicate=true. Run: pip install imagehash")
 
-    # ── 1. Compute pHash for every image ──────────────────────────────────────
+    # ── 1. Compute pHash for every image (disk-cached; the dataset is static) ──
+    # Caching makes repeated splits (e.g. the multi-seed evaluator) skip the
+    # ~30 s hashing pass — the hash depends only on the image file, not the seed.
+    import json
+
+    cache_path = ROOT / "experiments" / ".phash_cache.json"
+    try:
+        cache = json.loads(cache_path.read_text()) if cache_path.exists() else {}
+    except Exception:
+        cache = {}
+
     hashes: dict[int, object] = {}
+    dirty = False
     for i, (path, _) in enumerate(samples):
+        key = str(path)
+        if key in cache:
+            hashes[i] = imagehash.hex_to_hash(cache[key])
+            continue
         try:
-            hashes[i] = imagehash.phash(PILImage.open(path).convert("RGB"), hash_size=8)
+            h = imagehash.phash(PILImage.open(path).convert("RGB"), hash_size=8)
         except Exception:
-            hashes[i] = imagehash.phash(PILImage.new("RGB", (8, 8)), hash_size=8)
+            h = imagehash.phash(PILImage.new("RGB", (8, 8)), hash_size=8)
+        hashes[i] = h
+        cache[key] = str(h)
+        dirty = True
+
+    if dirty:
+        try:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(json.dumps(cache))
+        except Exception:
+            pass
 
     # ── 2. Build duplicate graph per class; union-find to get components ───────
     parent = list(range(len(samples)))
@@ -179,6 +206,21 @@ def _component_stratified_split(samples, val_split, test_split, seed, threshold=
     return train_idx, val_idx, test_idx
 
 
+def _seed_worker(worker_id):
+    """Seed each DataLoader worker's RNG so augmentation is reproducible.
+
+    torch sets a distinct base seed per worker (derived from the main process's
+    seeded generator); we propagate it to numpy/random which some transforms use.
+    """
+    import random as _random
+
+    import numpy as _np
+
+    s = torch.initial_seed() % (2 ** 32)
+    _np.random.seed(s)
+    _random.seed(s)
+
+
 def build_dataloaders(cfg):
     """Build train/val/test dataloaders and return them with the class names.
 
@@ -228,6 +270,7 @@ def build_dataloaders(cfg):
             num_workers=cfg.data.num_workers,
             pin_memory=torch.cuda.is_available(),
             generator=g if split == "train" else None,
+            worker_init_fn=_seed_worker,
         )
         for split, ds in datasets.items()
     }

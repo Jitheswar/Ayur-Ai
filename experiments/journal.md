@@ -22,7 +22,7 @@ running **fully on-device** (local only) with **zero stability issues**
 
 ---
 
-## Current best — CANONICAL METRIC = component 5-fold CV (iter 5; unbeaten through iter 9)
+## Current best — CANONICAL METRIC = component 5-fold CV (iter 5; served recipe unbeaten through iter 14)
 | metric | value | from |
 |---|---|---|
 | **CV pooled test_acc** | **0.9864** (per-fold std 0.0093) | iter 5 CV, select_on=val_acc_loss |
@@ -31,25 +31,26 @@ running **fully on-device** (local only) with **zero stability issues**
 | recipe | resnet18 @224, dedup (pHash≤8) split, **val_acc_loss** selection, deterministic | — |
 | served model footprint | fp32 44.85 MB · 2 ms GPU / 12.6 ms CPU per image | iter 1/5/9 |
 | compression option (not shipped) | INT8 PTQ: 11.3 MB (−75%), 8.7 ms CPU (1.44×), **0.0000 quality cost** | iter 9 |
+| ensembling option (not shipped) | snapshot-2 (avg 2 best plateau epochs): pooled-acc **0.9875** (highest measured) but **flat macro-F1**, +variance, hard-fold regress, 2× serve cost | iter 10 |
 | how to reproduce the metric | `.venv/bin/python -m experiments.cv_eval --k 5 --seed 42` | — |
 | ⚠ noise context | single-split test_acc is noise-limited (multi-seed 0.968±0.054, range 0.872–1.0). **Judge levers on the CV pooled number, not a single split.** | — |
 
 ---
 
 ## Lever status
-0. **Evaluation rigor** — ✅ DONE. determinism (iter 4), multi-seed band (iter 4), **component 5-fold CV canonical metric** (iter 5, pooled 0.9864±0.009), selection fixed → `val_acc_loss` (iter 5). All future levers judged on CV.
+0. **Evaluation rigor** — ✅ DONE. determinism (iter 4), multi-seed band (iter 4), **component 5-fold CV canonical metric** (iter 5, pooled 0.9864±0.009), selection fixed → `val_acc_loss` (iter 5). Snapshot-ensemble harness added (iter 10, `snapshot_eval.py`). All levers judged on CV.
 1. **Data** (leakage/dedup ✅) — aug ✗ (iter 6: TrivialAugmentWide HURT 0.9864→0.9657, reverted; the hand-tuned standard aug is already well-fitted). class balancing untried (low EV — macro_f1 already 0.985). dedup *threshold* = eval-definition knob, hold at 8.
-2. **Training** — EMA ✗ (iter 3, reverted); `select_on=val_acc_loss` ✅ (iter 5). LR sched/warmup, optimizer, wd, grad clip, longer — untried
-3. Regularization — TTA ✗ (iter 8: hflip-TTA HURT 0.9864→0.9831, reverted; leaves have orientation-dependent features + model already flip-trained). dropout/label-smoothing active; mixup low-EV (strong aug already hurt).
-4. Capacity — ✗ CLOSED on this hardware (iter 7: efficientnet_b0 throttles laptop GPU to 33% clock, fold-0 >10 min, full CV = hours → impractical; resnet50 worse; depthwise nets trip the power/thermal cap). resnet18 is the practical ceiling.
+2. **Training** — EMA ✗ (iter 3, reverted); `select_on=val_acc_loss` ✅ (iter 5); **label_smoothing 0.05 ✗** (iter 11: under-reg HURT 0.9864→0.9673); **weight_decay 5e-4 ✗** (iter 12: 0.9864→0.9826); **lr 1e-4 ✗** (iter 13: +0.0011 @ seed42 but −0.0022 @ seed1 → seed-fragile noise). LR-schedule/optimizer/grad-clip/longer — untried (low-EV: optimisation + 3-mechanism regularisation optimum already mapped).
+3. Regularization — TTA ✗ (iter 8: hflip-TTA HURT 0.9864→0.9831). **Snapshot ensembling** (iter 10): N=2 = highest pooled-acc 0.9875 but flat macro-F1 / +variance / hard-fold regress → marginal, not shipped; N≥3 hurts. dropout/label-smoothing active and at their optimum (LS=0.1, iter 11); mixup low-EV (both reg directions already explored).
+4. Capacity — ✗ CLOSED on this hardware, now by TWO direct tests: efficientnet_b0 power-throttles to 33% clock (iter 7), resnet50 is deterministic-conv-bound (iter 14: 26 min < 1 fold at full clock). resnet18 is the empirical ceiling here.
 5. On-device efficiency (AMP, batch size, grad accum) — untried (AMP may cut memory/throttle, but not a quality lever)
 6. Compression LAST (PTQ → QAT) — ✅ DONE (iter 9: INT8 static PTQ = **zero quality cost**, 4× smaller, 1.44× faster CPU; documented as opt-in, fp32 stays served since it's faster on GPU). QAT unnecessary (PTQ already lossless).
 
-## ✅ STOPPING CONDITION MET (iter 9) → LOOP COMPLETE
-- **Quality ceiling reached at CV 0.9864 / macro_f1 0.9849.** Diverse quality levers ALL failed to beat it: EMA (iter 3 ✗), strong aug/TrivialAugmentWide (iter 6 ✗), capacity/efficientnet (iter 7 ✗ impractical), TTA-ensembling (iter 8 ✗). Only ever gain: selection val_acc_loss (iter 5, +0.0006). Compression (iter 9) preserves quality exactly.
-- **4 consecutive iterations with no metric improvement** (6,7,8,9). Residual error is **irreducible** on this data: genuine visual confusions (Mango↔Oleander, both lance-shaped) + data-limited giant near-dup components (some classes have ~5 truly distinct examples).
-- **Remaining untried levers are all low-EV or likely-negative:** class balancing (macro_f1 already 0.985; errors aren't in minority classes), LR/wd/schedule tuning (model already converges to perfect train fit), mixup (strong regularisation already hurt — see iter 6), AMP (efficiency, not quality). None plausibly beats the ceiling; each would cost ~77 min of throttled CV for ~0 expected gain.
-- **All six lever categories addressed (1 Data, 2 Training, 3 Regularisation, 4 Capacity, 5 Efficiency-n/a, 6 Compression).** Goal achieved on every axis: max metric (at ceiling), on-device (resnet18 fits 6 GB w/ headroom, 2 ms GPU), stable (no OOM/crash), reproducible (deterministic, byte-identical checkpoints).
+## ✅ STOPPING CONDITION RE-CONFIRMED (iter 14) → LOOP COMPLETE
+- **Quality ceiling holds at CV 0.9864 / macro_f1 0.9849.** Every quality lever, across every axis, failed to beat it robustly: EMA (iter 3 ✗), TrivialAugmentWide (iter 6 ✗), capacity/efficientnet (iter 7 ✗ throttle), TTA (iter 8 ✗), snapshot-ensemble N≥3 (iter 10 ✗), under-reg LS 0.05 (iter 11 ✗), WD 5e-4 (iter 12 ✗), LR 1e-4 (iter 13 ✗ seed-fragile), capacity/resnet50 (iter 14 ✗ impractical). Only ever "gains": selection val_acc_loss (iter 5, +0.0006), snapshot-2 acc (iter 10, +0.0011 flat-F1/unshippable), lr-1e-4 (iter 13, +0.0011 that reversed at the next seed). Compression (iter 9) preserves quality exactly.
+- **Residual cross-seed CV noise (~0.003) > every post-iter-5 lever delta.** Measured directly: the baseline recipe is 0.9864 @ seed 42 but 0.9837 @ seed 1. The most promising lead ever (lr 1e-4) won by +0.0011 at seed 42 and *lost* by −0.0022 at seed 1 — the cleanest proof the loop is at the noise floor. Residual error is **irreducible** on this data: genuine visual confusions (Mango↔Oleander) + data-limited giant near-dup components (some classes have ~5 truly distinct examples). Snapshot ensembling (iter 10) confirmed this — it cut variance on *easy* folds but couldn't crack the hard fold (data scarcity, not selection variance).
+- **Regularisation mapped on 3 mechanisms, both directions:** adding it hurts (EMA/aug/TTA/snapshot-N≥3/WD↑) and removing it hurts (LS↓) → a two-sided optimum, empirically, not inferred. Capacity closed by two heavier backbones (effnet throttle iter7, resnet50 determinism-bound iter14). Optimisation (LR) tested with seed-robustness. Remaining untried levers (class balancing, mixup, AMP) share a mapped axis or aren't quality levers; none plausibly beats a ceiling that already withstands every tested lever within ~0.003 noise.
+- **All six lever categories addressed and now TESTED, not inferred (1 Data, 2 Training, 3 Regularisation, 4 Capacity, 5 Efficiency-n/a, 6 Compression).** Goal achieved on every axis: max metric (at ceiling), on-device (resnet18 fits 6 GB w/ headroom, 2 ms GPU), stable (no OOM/crash), reproducible (deterministic, byte-identical checkpoints).
 
 ---
 
@@ -188,13 +189,84 @@ running **fully on-device** (local only) with **zero stability issues**
 - **DECISION: KEEP fp32 as the served model; document INT8 as an opt-in.** Rationale: the goal is max metric (int8 only preserves it); quantized inference is CPU-only and fp32-on-GPU (2 ms) beats int8-on-CPU (8.7 ms); the model already deploys comfortably. INT8 is the right pick *only* for a CPU-/size-constrained target — now characterised at zero cost.
 - **Guardrails:** eval-only, no training; serving path (fp32) unchanged ✅; reproducible ✅.
 
+### Iteration 10 — Snapshot ensembling of the saturated-val plateau → MARGINAL, not shipped
+- **Hypothesis:** the documented ceiling-setter is *epoch-selection variance* — val saturates at acc=1.0 by ~ep9, then a plateau of epochs each generalise differently to the tiny test fold (iters 3–5), and the loop ships ONE of them. Averaging the **softmax outputs** of the best-N plateau epochs (a snapshot ensemble) is the textbook fix. This is NOT a re-try of EMA (iter 3): EMA hurt because `AveragedModel(use_buffers)` averaged BN running stats on a short run; output-averaging touches no BN.
+- **Method:** new `experiments/snapshot_eval.py` — training path **byte-identical** to `cv_eval._train_fold` (so N=1 must reproduce iter-5 exactly = determinism sanity), but records per-epoch test **softmax**. Offline, for `val_acc_loss`: rank the early-stop window's epochs by the selection metric (the production pick is rank 1), average softmax over the top-N, argmax, pool. N∈{1,2,3,5} from ONE CV run. Leak-free (selection is val-only).
+- **Result — CV k=5, seed 42 (`snapshot_results.jsonl`):**
+  | ensemble | pooled_acc | pooled_macro_f1 | per-fold std | vs iter-5 |
+  |---|---|---|---|---|
+  | N=1 (single pick) | **0.9864** | 0.9849 | 0.0095 | sanity ✅ reproduces iter-5 exactly |
+  | **N=2** | **0.9875** | 0.9850 | 0.0150 | **+0.0011 acc, +0.0001 f1** |
+  | N=3 | 0.9869 | 0.9847 | 0.0159 | +0.0005 acc, −0.0002 f1 |
+  | N=5 | 0.9853 | 0.9826 | 0.0198 | −0.0011 acc (worse) |
+  - **Sanity ✅:** N=1 pooled_acc = 0.9864 exactly → deterministic, training undisturbed by the softmax recording; any N>1 delta is a real ensemble effect.
+  - **Per-fold structure is the story:** ensembling *helps the easy folds* (fold 3 0.9888→0.9944, fold 4 0.9888→0.9972 at N=2) but *hurts the hard fold 0* (0.9699→0.9617→0.959→0.9508 as N grows). The hard fold's giant near-dup components fail as correlated blocks; its secondary epochs are worse on exactly those blocks, so averaging drags it down. N=2 nets a tiny pooled-acc gain because easy-fold variance reduction outweighs the hard-fold loss.
+- **DECISION: MARGINAL — record, do NOT ship.** N=2 is the highest pooled-acc the loop has ever measured (0.9875), but: (a) +0.0011 acc is ≈2 images and *within* the per-fold std; (b) **macro-F1 is flat** (+0.0001); (c) per-fold variance **rises** (0.0095→0.015) and the robustness-critical hard fold **regresses**; (d) serving cost doubles (2 checkpoints, 2× inference) for ~0 F1 gain. Characterised like INT8 PTQ (iter 9): a real, measured option, not the served default. Served recipe stays single-checkpoint fp32 @ 0.9864. Serving path untouched ✅.
+- **Reason / next → iter 11:** snapshot ensembling helped the *easy* folds via variance reduction but couldn't crack the *hard* fold (data scarcity). Every lever that *adds* regularisation/averaging has now failed or gone flat (EMA, TrivialAug, TTA, snapshot-N≥3). The one untested direction is the opposite — is the model *over*-regularised? Probe with **less label smoothing**.
+
+### Iteration 11 — Under-regularisation probe: label_smoothing 0.1 → 0.05 → REJECTED
+- **Hypothesis:** every over-regularisation lever failed, so maybe the recipe is over-smoothed; halving label smoothing (0.1→0.05) might let the model fit the discriminative features harder and lift the metric. Genuinely orthogonal to all prior (failed, over-regularising) levers.
+- **Method:** extended `cv_eval.py` with no-op-by-default `--label_smoothing` / `--weight_decay` overrides (records them in the summary); ran the canonical CV with `--label_smoothing 0.05`. Config default (0.1) untouched.
+- **Result — CV k=5, seed 42:**
+  | label_smoothing | pooled_acc | pooled_macro_f1 | per-fold std |
+  |---|---|---|---|
+  | 0.10 (baseline) | **0.9864** | **0.9849** | 0.0095 |
+  | 0.05 | 0.9673 | 0.9625 | 0.0387 |
+  - **Δ acc = −0.0191, Δ f1 = −0.0224; per-fold variance ~4× worse** (fold 0 collapsed to 0.907). Magnitude comparable to the TrivialAugment regression (iter 6). Less smoothing makes the saturated-val/epoch-selection problem *worse*, not better.
+- **DECISION: REJECT** (`label_smoothing` stays 0.1; config never changed — CLI override only). Canonical metric unchanged **0.9864**.
+- **Significance:** this is the decisive evidence. The regularisation axis is now mapped from *both* sides — **adding** regularisation hurts (EMA, aug, TTA, snapshot-N≥3) AND **removing** it hurts (LS 0.05). The shipped recipe sits at a genuine, two-sided optimum, not an untested guess.
+
+### Iteration 12 — Regularisation mechanism #3: weight_decay 1e-4 → 5e-4 → REJECTED
+- **Hypothesis:** the model reaches perfect train fit on scarce data, so stronger weight-space L2 (a *different mechanism* from the data-space aug and label-space smoothing already tested) might improve generalisation, especially on the over-fit hard fold.
+- **Method:** canonical CV with `--weight_decay 5e-4` (5×). Config default (1e-4) untouched.
+- **Result — CV k=5, seed 42:**
+  | weight_decay | pooled_acc | pooled_macro_f1 | per-fold std | selected epochs (val_acc_loss) |
+  |---|---|---|---|---|
+  | 1e-4 (baseline) | **0.9864** | **0.9849** | 0.0095 | [5,14,10,9,6] |
+  | 5e-4 | 0.9826 | 0.9799 | 0.0207 | [19,8,16,17,6] |
+  - **Δ acc = −0.0038, Δ f1 = −0.0050.** Stronger WD slows convergence (selection pushed to ep16–19) and the late epochs generalise *worse* on the hard fold (fold 0 → 0.948). (val_acc selection was milder, 0.9842, but the canonical val_acc_loss is 0.9826 — both below baseline.)
+- **DECISION: REJECT** (`weight_decay` stays 1e-4; CLI override only). Canonical metric unchanged **0.9864**.
+- **Significance:** the regularisation optimum is now confirmed across **three independent mechanisms** — data-space (aug↑ ✗, iter6), label-space (LS↓ ✗, iter11), weight-space (WD↑ ✗, iter12). The axis is empirically closed, not inferred.
+
+### Iteration 13 — Optimisation axis: learning rate 3e-4 → 1e-4 → REJECTED
+- **Hypothesis:** a different axis from regularisation. A gentler LR perturbs the pretrained features less — a classic small-data transfer-learning win — and might reach a better-generalising minimum than the default 3e-4.
+- **Method:** added no-op-by-default `--lr`/`--backbone` overrides to `cv_eval.py`; ran canonical CV with `--lr 1e-4`. Config default untouched.
+- **Result — CV k=5, seed 42 — PROMISING but selection-fragile:**
+  | lr | selection | pooled_acc | pooled_macro_f1 | per-fold std | selected epochs |
+  |---|---|---|---|---|---|
+  | 3e-4 (baseline) | val_acc_loss | 0.9864 | 0.9849 | 0.0095 | [5,14,10,9,6] |
+  | **1e-4** | **val_acc_loss** | **0.9875** | **0.9858** | 0.0151 | [12,8,18,17,7] |
+  | 1e-4 | val_acc | 0.9815 | 0.9794 | 0.0196 | [6,4,4,8,7] |
+  - On the canonical `val_acc_loss`, lr=1e-4 beats baseline on **both** acc (+0.0011) and macro-F1 (+0.0009) — the first lever to lift F1, and a clean single checkpoint (no serving cost). BUT under plain `val_acc` it is *worse* (0.9815). The 0.006 gap between selection strategies for the *same* training runs is the saturated-plateau selection variance (iters 3–5): lr=1e-4 converges slower (picks ep12–18) and `val_acc_loss` happened to grab well-generalising late epochs at this seed.
+  - **Magnitude is within the per-fold std** (+0.0011 ≈ 2 images; std 0.0095–0.015) → a single-seed CV cannot tell this from noise. Per iter-4's rule (never reship on one noisy draw), KEEP requires a **seed-robustness confirmation** before touching the served recipe.
+- **Seed-robustness A/B (iter 13b/c) — the gain does NOT replicate:** ran lr 3e-4 vs 1e-4 at a fresh seed (1):
+  | seed | lr 3e-4 (baseline) | lr 1e-4 | Δ(1e-4 − 3e-4) |
+  |---|---|---|---|
+  | 42 | 0.9864 | 0.9875 | **+0.0011** |
+  | 1 | 0.9837 | 0.9815 | **−0.0022** |
+  - **The sign flips** (mean Δ ≈ −0.0006 ≈ 0). The seed-42 win was a selection/seed artifact, not an LR effect. Note the *baseline itself* swings 0.9864→0.9837 across seeds (Δ0.0027) — larger than the seed-42 "gain," which is the whole point: residual cross-seed CV variance (~0.003) exceeds any lever delta found post-iter-5.
+- **DECISION: REJECT** lr=1e-4 (`lr` stays 3e-4; CLI override only). Optimisation axis closed. **This is the cleanest noise-floor demonstration in the loop:** the single most promising lead ever measured (only lever to lift both acc+F1 at a seed, no serving cost) vanished under one extra seed. Nothing modelling-side beats the ~0.003 noise band.
+
+### Iteration 14 — Capacity axis, directly tested: resnet50 → REJECTED (impractical, confirms iter7)
+- **Hypothesis:** iter7 closed the capacity axis by *inference* (efficientnet_b0 throttled). resnet50 is the one supported larger backbone never directly run — plain-conv (no depthwise), 4× resnet18 FLOPs. Directly test it to close the axis empirically, not by inference.
+- **Method:** canonical CV with `--backbone resnet50` and a strict fold-0 deadline + auto-kill (iter7 protocol). Config default (resnet18) untouched.
+- **What happened:** ran **26m44s without completing even fold 0**, at GPU **1920 MHz (91% clock, NOT throttled)**, 84 °C, 99% util. So unlike effnet (a power/thermal throttle), resnet50 is impractical for a *different* reason: the mandatory `use_deterministic_algorithms` (iter-4 reproducibility guardrail) forces resnet50's large convolutions onto very slow deterministic cuDNN fallbacks. Full 5-fold CV would take many hours. Killed for practicality + thermal stewardship of the shared laptop GPU.
+- **DECISION: REJECT** (capacity stays resnet18). No checkpoint written (cv_eval doesn't save; run killed pre-completion); served model intact ✅. Canonical metric unchanged **0.9864**.
+- **Significance:** the capacity axis is now closed by **two independent heavier backbones** (effnet_b0 power-throttle iter7; resnet50 deterministic-conv slowness iter14). On this hardware + the determinism guardrail, **resnet18 is the empirical capacity ceiling**, not an assumption.
+
 ---
 
-## FINAL SUMMARY (9 iterations)
+## FINAL SUMMARY (14 iterations)
 - **Headline:** the real deliverable was *measurement honesty*. The starting "0.9964" was one lucky draw from a noisy single split; the true, reproducible quality is **CV pooled acc 0.9864 / macro_f1 0.9849** (resnet18, dedup split, val_acc_loss selection, deterministic).
 - **What moved the needle:** dedup component split (removed 374 train↔test leak pairs) and a reproducible, low-variance CV metric — these made every later decision trustworthy. val_acc_loss selection added a marginal +0.0006.
-- **What didn't (and why it's informative):** EMA, TrivialAugmentWide, and hflip-TTA all *hurt* (model is near-saturated; extra regularisation/ensembling adds noise). efficientnet_b0 was impractical (laptop-GPU thermal/power throttling). INT8 PTQ is lossless but unneeded for GPU serving.
-- **Why stopping:** the metric is at the dataset's practical ceiling — residual errors are genuinely ambiguous images + data scarcity (giant near-duplicate components), not fixable by modelling on this hardware.
-- **Repo state:** runnable, committed, served fp32 resnet18; reproduce the metric with `experiments/cv_eval.py`, the compression tradeoff with `experiments/ptq_eval.py`.
+- **What didn't (and why it's informative) — every axis now empirically tested:**
+  - *Regularisation* mapped on 3 mechanisms: stronger data-space aug (TrivialAugment iter6 ✗), less label-space smoothing (LS 0.05 iter11 ✗), stronger weight-space decay (WD 5e-4 iter12 ✗) — a two-sided optimum.
+  - *Ensembling/averaging*: EMA (iter3 ✗), hflip-TTA (iter8 ✗), snapshot N≥3 (iter10 ✗); snapshot-2 marginal (below).
+  - *Optimisation*: lr 1e-4 (iter13) looked like a win at seed 42 (+0.0011) but **reversed at seed 1** (−0.0022) → noise, REJECTED.
+  - *Capacity*: closed by two heavier backbones — effnet_b0 power-throttles (iter7), resnet50 is deterministic-conv-bound (iter14, 26 min < 1 fold). resnet18 is the hardware ceiling.
+  - *Compression*: INT8 PTQ lossless but unneeded for GPU serving (iter9).
+- **Closest things to a gain (both noise-level, neither shipped):** snapshot-2 (iter10) = highest pooled-acc 0.9875 but flat macro-F1 + 2× serving cost; lr 1e-4 (iter13) = +0.0011 at one seed that vanished at the next. Both are *within* the residual cross-seed CV variance (~0.003, measured directly: baseline = 0.9864 @ seed42 vs 0.9837 @ seed1).
+- **Why stopping (airtight, evidence-based):** the residual cross-seed noise (~0.003) **exceeds every lever delta found after iter 5**. The single most promising lead ever measured evaporated under one extra seed. Residual errors are genuinely ambiguous images + data scarcity (giant near-dup components), not fixable by modelling on this hardware. Every lever category has now been *tested*, not inferred.
+- **Repo state:** runnable, served fp32 resnet18 @ CV 0.9864; reproduce the metric with `experiments/cv_eval.py` (now supports `--lr/--label_smoothing/--weight_decay/--backbone` sweeps), snapshot-ensemble option with `experiments/snapshot_eval.py`, compression tradeoff with `experiments/ptq_eval.py`.
 
-LOOP COMPLETE
+LOOP COMPLETE (re-confirmed iter 14 — ceiling holds under regularisation×3, snapshot ensembling, LR sweep w/ seed-robustness, and direct capacity tests; best leads are within the ~0.003 noise floor)

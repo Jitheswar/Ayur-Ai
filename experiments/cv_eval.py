@@ -117,20 +117,38 @@ def main() -> None:
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--tag", default="cv")
     p.add_argument("--epochs", type=int, default=None, help="override epoch budget (smoke tests)")
+    p.add_argument("--label_smoothing", type=float, default=None, help="override train.label_smoothing")
+    p.add_argument("--weight_decay", type=float, default=None, help="override train.weight_decay")
+    p.add_argument("--lr", type=float, default=None, help="override train.lr")
+    p.add_argument("--backbone", type=str, default=None, help="override model.backbone")
     args = p.parse_args()
 
     if args.k < 3:
         raise SystemExit("--k must be >= 3 (rotation uses 1 test + 1 val fold, "
                          "leaving k-2 >= 1 folds for training).")
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    base = Config.load()
-    if args.epochs is not None:
-        base.train.epochs = args.epochs
+
+    def _apply_overrides(cfg):
+        """Apply optional hyperparameter overrides (None = leave config default)."""
+        if args.epochs is not None:
+            cfg.train.epochs = args.epochs
+        if args.label_smoothing is not None:
+            cfg.train.label_smoothing = args.label_smoothing
+        if args.weight_decay is not None:
+            cfg.train.weight_decay = args.weight_decay
+        if args.lr is not None:
+            cfg.train.lr = args.lr
+        if args.backbone is not None:
+            cfg.model.backbone = args.backbone
+        return cfg
+
+    base = _apply_overrides(Config.load())
     patience = base.train.early_stopping_patience
     samples = ImageFolder(str(base.raw_dir)).samples
     folds = component_kfold(samples, args.k, seed=args.seed)
     print(f"CV eval | device={device} | backbone={base.model.backbone} | k={args.k} "
-          f"| seed={args.seed} | fold sizes={[len(f) for f in folds]} | epochs={base.train.epochs}")
+          f"| seed={args.seed} | fold sizes={[len(f) for f in folds]} | epochs={base.train.epochs} "
+          f"| lr={base.train.lr} | label_smoothing={base.train.label_smoothing} | weight_decay={base.train.weight_decay}")
 
     # Train every fold once, recording everything needed for offline selection A/B.
     fold_logs, fold_true = [], []
@@ -139,9 +157,8 @@ def main() -> None:
         test_idx = folds[i]
         val_idx = folds[(i + 1) % args.k]
         train_idx = [ix for j in range(args.k) if j not in (i, (i + 1) % args.k) for ix in folds[j]]
-        cfg = Config.load()
+        cfg = _apply_overrides(Config.load())
         cfg.data.seed = args.seed
-        cfg.train.epochs = base.train.epochs  # honour any --epochs override
         T.set_seed(args.seed)
         elog, ytrue = _train_fold(cfg, device, (train_idx, val_idx, test_idx))
         fold_logs.append(elog)
@@ -184,6 +201,8 @@ def main() -> None:
         "tag": args.tag, "backbone": base.model.backbone, "k": args.k, "seed": args.seed,
         "n_images": len(samples), "fold_sizes": [len(f) for f in folds],
         "epochs_budget": base.train.epochs, "patience": patience,
+        "lr": base.train.lr,
+        "label_smoothing": base.train.label_smoothing, "weight_decay": base.train.weight_decay,
         "elapsed_s": round(time.time() - t0, 1),
         "strategies": results,
     }
